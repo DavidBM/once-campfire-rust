@@ -54,6 +54,19 @@ misses and first renders, and wherever the front is bypassed (the bare app on `T
 
 ## Over HTTP
 
-To be added by the coordinator. Through the front, lexxy.js and its map would come from the
-response cache after the first request and time the same before and after, so the asset comparison
-(`--gzip 1`) runs against the bare app port, `PORT + 1`.
+Measured in [`static-assets-http-20260930`](../static-assets-http-20260930/summary.md): main at
+`0dbd10d` (the same code as `d93d3dd`) against `2d9b6a8`. Three native builds were interleaved over
+three reps, 8 s per cell, against the bare app with `--gzip 1`, so every request deflates the whole
+asset. Medians:
+
+| Request | Clients | main req/s | branch req/s | main CPU/req | branch CPU/req |
+|---|---|---|---|---|---|
+| lexxy.js, bare app, gzip | 1 | 101 | 105 (1.05×) | 9.83 ms | 9.38 ms (-5%) |
+| lexxy.js, bare app, gzip | 16 | 400 | 421 (1.05×) | 9.95 ms | 9.46 ms (-5%) |
+| lexxy.js.map, bare app, gzip | 1 | 39 | 41 (1.05×) | 25.29 ms | 24.15 ms (-5%) |
+| lexxy.js.map, bare app, gzip | 16 | 156 | 164 (1.05×) | 25.55 ms | 24.37 ms (-5%) |
+
+Deflating a large asset takes 5% less CPU and serves 5% more requests, close to the in-process
+−4.4% for lexxy.js. The page routes weren't measured over HTTP: in steady state they reuse stored
+compressed pieces, and the front caches each asset's gzipped response, so neither deflates per
+request.

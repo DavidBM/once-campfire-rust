@@ -1,0 +1,311 @@
+{
+ "config": "native-flate2",
+ "rep": 2,
+ "load_start": [
+  "6.75",
+  "8.42",
+  "9.67"
+ ],
+ "http": [
+  {
+   "avg_bytes": 922910,
+   "conc": "1",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 0.608,
+    "mean_ms": 0.14,
+    "n": 56138,
+    "p50_ms": 0.109,
+    "p90_ms": 0.239,
+    "p99_ms": 0.351
+   },
+   "ok": 56138,
+   "path": "/assets/lexxy-a21f41d4.js",
+   "rps": 7017.1,
+   "secs": 8.0,
+   "statuses": {
+    "200": 56138
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.0684
+   },
+   "case": "bare js identity"
+  },
+  {
+   "avg_bytes": 922910,
+   "conc": "16",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 6.995,
+    "mean_ms": 0.51,
+    "n": 243286,
+    "p50_ms": 0.49,
+    "p90_ms": 0.715,
+    "p99_ms": 1.128
+   },
+   "ok": 243286,
+   "path": "/assets/lexxy-a21f41d4.js",
+   "rps": 30407.3,
+   "secs": 8.0,
+   "statuses": {
+    "200": 243286
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.0839
+   },
+   "case": "bare js identity"
+  },
+  {
+   "avg_bytes": 2179664,
+   "conc": "1",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 1.144,
+    "mean_ms": 0.38,
+    "n": 19533,
+    "p50_ms": 0.29,
+    "p90_ms": 0.609,
+    "p99_ms": 0.75
+   },
+   "ok": 19533,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 2441.6,
+   "secs": 8.0,
+   "statuses": {
+    "200": 19533
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1387
+   },
+   "case": "bare map identity"
+  },
+  {
+   "avg_bytes": 2179664,
+   "conc": "16",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 10.343,
+    "mean_ms": 2.35,
+    "n": 54099,
+    "p50_ms": 2.325,
+    "p90_ms": 3.019,
+    "p99_ms": 3.853
+   },
+   "ok": 54099,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 6760.3,
+   "secs": 8.0,
+   "statuses": {
+    "200": 54099
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.3148
+   },
+   "case": "bare map identity"
+  },
+  {
+   "avg_bytes": 1218,
+   "conc": "1",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 3.223,
+    "mean_ms": 0.01,
+    "n": 575999,
+    "p50_ms": 0.013,
+    "p90_ms": 0.014,
+    "p99_ms": 0.021
+   },
+   "ok": 575999,
+   "path": "/assets/_reset-9c3efd7b.css",
+   "rps": 71999.3,
+   "secs": 8.0,
+   "statuses": {
+    "200": 575999
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.0079
+   },
+   "case": "bare css identity"
+  },
+  {
+   "avg_bytes": 1218,
+   "conc": "16",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 2.463,
+    "mean_ms": 0.03,
+    "n": 3941194,
+    "p50_ms": 0.031,
+    "p90_ms": 0.042,
+    "p99_ms": 0.08
+   },
+   "ok": 3941194,
+   "path": "/assets/_reset-9c3efd7b.css",
+   "rps": 492627.6,
+   "secs": 8.0,
+   "statuses": {
+    "200": 3941194
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.0062
+   },
+   "case": "bare css identity"
+  },
+  {
+   "avg_bytes": 2179664,
+   "conc": "1",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 2.141,
+    "mean_ms": 0.28,
+    "n": 27180,
+    "p50_ms": 0.247,
+    "p90_ms": 0.388,
+    "p99_ms": 0.706
+   },
+   "ok": 27180,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 3397.4,
+   "secs": 8.0,
+   "statuses": {
+    "200": 27180
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1508
+   },
+   "case": "front map identity"
+  },
+  {
+   "avg_bytes": 2179664,
+   "conc": "16",
+   "errors": 0,
+   "gzip": false,
+   "latency": {
+    "max_ms": 42.495,
+    "mean_ms": 2.4,
+    "n": 52886,
+    "p50_ms": 2.357,
+    "p90_ms": 3.091,
+    "p99_ms": 4.001
+   },
+   "ok": 52886,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 6608.6,
+   "secs": 8.0,
+   "statuses": {
+    "200": 52886
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.325
+   },
+   "case": "front map identity"
+  },
+  {
+   "avg_bytes": 259991,
+   "conc": "1",
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 10.719,
+    "mean_ms": 9.36,
+    "n": 855,
+    "p50_ms": 9.343,
+    "p90_ms": 9.423,
+    "p99_ms": 9.799
+   },
+   "ok": 855,
+   "path": "/assets/lexxy-a21f41d4.js",
+   "rps": 106.8,
+   "secs": 8.01,
+   "statuses": {
+    "200": 855
+   },
+   "cpu_ms_per_req": {
+    "campfire": 9.2865
+   },
+   "case": "bare js gzip"
+  },
+  {
+   "avg_bytes": 259991,
+   "conc": "16",
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 76.415,
+    "mean_ms": 37.83,
+    "n": 3392,
+    "p50_ms": 37.887,
+    "p90_ms": 56.607,
+    "p99_ms": 66.047
+   },
+   "ok": 3392,
+   "path": "/assets/lexxy-a21f41d4.js",
+   "rps": 422.1,
+   "secs": 8.04,
+   "statuses": {
+    "200": 3392
+   },
+   "cpu_ms_per_req": {
+    "campfire": 9.434
+   },
+   "case": "bare js gzip"
+  },
+  {
+   "avg_bytes": 426066,
+   "conc": "1",
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 26.879,
+    "mean_ms": 24.11,
+    "n": 332,
+    "p50_ms": 24.047,
+    "p90_ms": 24.399,
+    "p99_ms": 25.151
+   },
+   "ok": 332,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 41.4,
+   "secs": 8.01,
+   "statuses": {
+    "200": 332
+   },
+   "cpu_ms_per_req": {
+    "campfire": 23.8855
+   },
+   "case": "bare map gzip"
+  },
+  {
+   "avg_bytes": 426066,
+   "conc": "16",
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 214.271,
+    "mean_ms": 96.26,
+    "n": 1337,
+    "p50_ms": 96.575,
+    "p90_ms": 143.999,
+    "p99_ms": 167.423
+   },
+   "ok": 1337,
+   "path": "/assets/lexxy-cf040c43.js.map",
+   "rps": 165.3,
+   "secs": 8.09,
+   "statuses": {
+    "200": 1337
+   },
+   "cpu_ms_per_req": {
+    "campfire": 24.0464
+   },
+   "case": "bare map gzip"
+  }
+ ]
+}
