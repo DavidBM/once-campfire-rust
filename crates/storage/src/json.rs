@@ -1,8 +1,10 @@
 //! Order-preserving JSON, encoded the way `ActiveSupport::JSON.encode` does.
 //!
 //! Blob metadata (`ActiveRecord::Coders::JSON`) and the Active Storage verifier payloads are
-//! Ruby hashes, so key order is part of the stored bytes and the signed messages. `serde_json`'s
-//! `Map` sorts keys, so this module keeps its own ordered value type.
+//! Ruby hashes, so key order is part of the stored bytes and the signed messages. This small
+//! owned value type keeps that order, and gives `Hash#[]=`/`Hash#merge` and an integer/float
+//! split that callers match on (a video's `1920.0` width renders differently from an image's
+//! `1920`). `serde_json::Value` with the workspace's `preserve_order` could hold the same data.
 
 use std::fmt::{self, Write};
 
@@ -132,8 +134,8 @@ impl From<bool> for Json {
     }
 }
 
-/// ActiveSupport escapes HTML-significant characters and the JS line separators on top of the
-/// JSON gem's escaping (`ActiveSupport::JSON::Encoding::ESCAPED_CHARS`).
+/// ActiveSupport escapes HTML-significant characters on top of the JSON gem's escaping. It leaves
+/// U+2028 and U+2029 raw: `load_defaults` 8.1+ turns `escape_js_separators_in_json` off.
 fn encode_string(s: &str, out: &mut String) {
     out.push('"');
     for c in s.chars() {
@@ -148,8 +150,6 @@ fn encode_string(s: &str, out: &mut String) {
             '<' => out.push_str("\\u003c"),
             '>' => out.push_str("\\u003e"),
             '&' => out.push_str("\\u0026"),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
             c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).unwrap(),
             c => out.push(c),
         }
@@ -267,6 +267,12 @@ mod tests {
         assert_eq!(encode_float(1234567890123456.0), "1234567890123456.0");
         assert_eq!(encode_float(-2.5), "-2.5");
         assert_eq!(encode_float(1.5e-7), "1.5e-07");
+    }
+
+    #[test]
+    fn leaves_js_line_separators_raw() {
+        // ActiveSupport::JSON.encode and ActiveRecord::Coders::JSON in the reference.
+        assert_eq!(Json::from("a\u{2028}b\u{2029}c<>&").encode(), "\"a\u{2028}b\u{2029}c\\u003c\\u003e\\u0026\"");
     }
 
     #[test]
