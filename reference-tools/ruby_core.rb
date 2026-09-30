@@ -5,8 +5,8 @@
 #
 # The strings are every character from U+0000 to U+00FF on its own (neither JSON nor a Rust `&str`
 # can hold a lone byte past 0x7F), then edge cases for the parsers. An integer is written as a
-# decimal string, since Ruby's go past 64 bits; a float as its `Float#to_s` (or, as an input, its
-# IEEE 754 bits in hex); and an exception as its class name.
+# decimal string, since Ruby integers go past 64 bits; a float as its `Float#to_s` (or, as an
+# input, its IEEE 754 bits in hex); and an exception as its class name.
 require "cgi"
 require "erb"
 require "json"
@@ -40,6 +40,7 @@ EDGE_STRINGS = [
   "+0x1A", "-0x1p3", "-0x1.8", "-0x.8", "-0x", "-0xg", "-0x1p", "-0x1_A", "-0x1Ag", " -0x10", "-0x1p-2",
   "-0x0", "-0x00.1", "-0x1P+4", "-0x" + "f" * 20, "+0x1e3", "-0x1p99999", "-0x1.fffffffffffff8p0",
   "+0x0.0000000000000000000000001p0", "-0x1p-1074", "-0x1p-1075", "-0x1.8p-1074", "+0x_1", "+0x1__2",
+  "-0x.", "+0x.", "0x.", "-0x.p1", "-0x.g", "-0x._1", "-0x1_.", "-0x1.p1", "-0xp1", "-0x_1",
   # String#strip
   "  \t", "\0\0", "\0x\0", " x ", " x ", "　x　", "\u{85}x\u{85}", "x\n\n",
   # The escapers
