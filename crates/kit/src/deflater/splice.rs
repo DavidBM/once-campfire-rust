@@ -786,4 +786,88 @@ mod tests {
         let vec: Vec<u8> = piece.into();
         assert!(vec.capacity() < 64 * 1024, "{} bytes of capacity for {}", vec.capacity(), vec.len());
     }
+
+    /// In-process timings behind bench/results/page-parts-hot-path-20260930: `cargo test --release
+    /// -p campfire_kit --lib -- --ignored --nocapture deflater::splice::tests::timing`. The page is
+    /// shaped like a captured room page: a 27 KB head, 40 messages of 9-11 KB with 7 bytes of glue
+    /// between them, and a 7 KB tail.
+    #[test]
+    #[ignore = "a timing harness, not a test"]
+    fn timing() {
+        use std::hint::black_box;
+        use std::time::{Duration, Instant};
+
+        fn time<T>(name: &str, iterations: u32, mut f: impl FnMut() -> T) {
+            let mut runs: Vec<Duration> = (0..9)
+                .map(|_| {
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        black_box(f());
+                    }
+                    start.elapsed() / iterations
+                })
+                .collect();
+            runs.sort();
+            println!("{name}: median {:?} (min {:?}, max {:?})", runs[4], runs[0], runs[8]);
+        }
+        fn layout(len: usize, seed: usize) -> String {
+            let mut text = String::new();
+            for n in 0.. {
+                text.push_str(&format!("<link rel=\"stylesheet\" href=\"/assets/{seed}-{n:04}.css\" data-turbo-track=\"reload\" />\n"));
+                if text.len() >= len {
+                    break;
+                }
+            }
+            text.truncate(len);
+            text
+        }
+        fn message(n: usize) -> Arc<String> {
+            let mut html = format!("<div id=\"message_{n:08x}-9264-5710-82c9-b963bf3c6d18\" class=\"message\">\n");
+            while html.len() < 9_000 + n * 397 % 2_000 {
+                html.push_str(&format!(
+                    "  <form class=\"button_to\" method=\"post\" action=\"/messages/{n}/boosts\"><button class=\"btn\" type=\"submit\">{n}</button></form>\n"
+                ));
+            }
+            html.push_str("</div>\n");
+            Arc::new(html)
+        }
+
+        let messages: Vec<Arc<String>> = (0..40).map(message).collect();
+        let (head, tail) = (layout(26_950, 1), layout(6_808, 2));
+        let glued: Vec<&str> = messages.iter().map(|m| m.as_str()).collect();
+        let body = format!("{head}{}{tail}", glued.join("    \n  "));
+        let body = body.as_bytes();
+        // No template puts more than MAX_GLUE bytes between messages; these are the worst cases.
+        let apart = |filler: &str| format!("{head}{}{tail}", glued.iter().map(|m| format!("{filler}{m}")).collect::<String>());
+        let far_apart = apart(&"<p class=\"message__meta\">Posted by someone</p>\n".repeat(20));
+        let far_apart = far_apart.as_bytes();
+        let far_apart_dense = apart(&"<b>x</b>\n".repeat(100));
+        let far_apart_dense = far_apart_dense.as_bytes();
+        let sidebar = layout(30_000, 3);
+        let sidebar = sidebar.as_bytes();
+        println!("room page: {} bytes, {} fragments; sidebar: {} bytes", body.len(), messages.len(), sidebar.len());
+
+        // Warm: every piece stored, as on every request after a page's first.
+        for page in [body, far_apart, far_apart_dense] {
+            let parts = PageParts::new(page, &messages).unwrap();
+            assert_eq!(gunzip(&parts.gzip(page, 0)), page);
+        }
+        PageParts::whole(sidebar).unwrap().gzip(sidebar, 0);
+
+        time("locate", 20_000, || locate(body, &messages).len());
+        time("locate, fragments 900 bytes of markup apart", 20_000, || locate(far_apart, &messages).len());
+        time("locate, fragments 900 bytes of <b>x</b> apart", 20_000, || locate(far_apart_dense, &messages).len());
+        let tail_start = body.len() - tail.len();
+        time("text identity, head and tail", 20_000, || {
+            (text_part(body, 0..head.len()).range().len(), text_part(body, tail_start..body.len()).range().len())
+        });
+        time("page assembly: parts, ETag, gzip from stored pieces", 2_000, || {
+            let parts = PageParts::new(body, &messages).unwrap();
+            (parts.etag(body), parts.gzip(body, 0).len())
+        });
+        time("whole-page assembly (sidebar): parts, ETag, gzip", 20_000, || {
+            let parts = PageParts::whole(sidebar).unwrap();
+            (parts.etag(sidebar), parts.gzip(sidebar, 0).len())
+        });
+    }
 }
