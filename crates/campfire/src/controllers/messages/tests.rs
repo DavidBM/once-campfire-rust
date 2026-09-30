@@ -2,7 +2,7 @@
 //! parity seed.
 
 use axum::http::{Method, StatusCode};
-use campfire_db::{Boost, Message};
+use campfire_db::{Boost, Message, PushSubscription, Webhook};
 
 use crate::controllers::presenters::test_support::*;
 
@@ -110,6 +110,69 @@ async fn uploads_attach_and_process_the_file() {
         .await
         .unwrap();
     assert_eq!(variants, 1, "the :thumb variant is processed");
+}
+
+/// Rails raises reading this body's plain text (`ArgumentError: invalid base64`), after the
+/// create commits; here it's saved with no plain text, or its attachment's filename (see "Known
+/// differences" in the README).
+const MENTION_WITH_A_BAD_SGID: &str =
+    r#"<p>Hey <action-text-attachment sgid="!!!" content-type="application/vnd.campfire.mention"></action-text-attachment></p>"#;
+
+const UNRENDERABLE: &str = "Failed to load message content";
+
+/// What search, a push and a bot's webhook get for a message.
+async fn plain_texts(app: &TestApp, message: Message) -> (String, String, String) {
+    let db = app.db().clone();
+    app.db()
+        .read(move |conn| {
+            let rich_text = &*db.env().rich_text;
+            let indexed = conn.query_row("SELECT body FROM message_search_index WHERE rowid = ?", [message.id], |r| r.get(0))?;
+            let (push, _, _) = PushSubscription::pushes_for(conn, rich_text, &message, db.env().now())?;
+            let webhook = Webhook::find_by_user(conn, BENDER)?.unwrap().payload(conn, rich_text, &message, "/bot", "/message")?;
+            let webhook: serde_json::Value = serde_json::from_str(&webhook).unwrap();
+            Ok((indexed, push.body, webhook["message"]["body"]["plain"].as_str().unwrap().to_string()))
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_message_whose_plain_text_raises_goes_out_without_one() {
+    let Some(app) = TestApp::boot().await else { return };
+    let mut david = app.david();
+    let room = format!("/rooms/{ALL_TALK}");
+    let unrenderable_before = david.get(&room).await.text().matches(UNRENDERABLE).count();
+
+    let reply = david
+        .write(
+            Req::new(Method::POST, &format!("/rooms/{ALL_TALK}/messages"))
+                .header("accept", TURBO_STREAM_ACCEPT)
+                .form(&[("message[body]", MENTION_WITH_A_BAD_SGID), ("message[client_message_id]", "bad-sgid")]),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    assert!(reply.text().contains(UNRENDERABLE), "{}", reply.text());
+    let message = messages_in(&app, ALL_TALK).await.pop().unwrap();
+    assert_eq!(message.client_message_id, "bad-sgid");
+    assert_eq!(plain_texts(&app, message.clone()).await, ("".into(), "David: ".into(), "".into()));
+
+    let page = david.get(&room).await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert_eq!(page.text().matches(UNRENDERABLE).count(), unrenderable_before + 1, "{}", page.text());
+    let shown = david.get(&format!("{room}/messages/{}", message.id)).await;
+    assert_eq!(shown.status, StatusCode::OK);
+    assert!(shown.text().contains(UNRENDERABLE), "{}", shown.text());
+
+    let reply = david
+        .write(Req::new(Method::POST, &format!("/rooms/{ALL_TALK}/messages")).header("accept", TURBO_STREAM_ACCEPT).multipart(
+            &[("message[body]", MENTION_WITH_A_BAD_SGID), ("message[client_message_id]", "bad-sgid-upload")],
+            ("message[attachment]", "red.png", "image/png", PNG),
+        ))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    let message = messages_in(&app, ALL_TALK).await.pop().unwrap();
+    assert_eq!(message.client_message_id, "bad-sgid-upload");
+    assert_eq!(plain_texts(&app, message).await, ("red.png".into(), "David: red.png".into(), "red.png".into()));
 }
 
 #[tokio::test]
