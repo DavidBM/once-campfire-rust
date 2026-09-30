@@ -292,7 +292,7 @@ impl<'a> Presenter<'a> {
     fn attachment(&self, message: &Message) -> Result<Option<AttachmentView>> {
         let blob = campfire_storage::Blob::attached(self.conn, "Message", message.id, "attachment").map_err(storage_error)?;
         let Some(blob) = blob else { return Ok(None) };
-        let verifier = &*self.storage.verifier;
+        let verifier = &self.storage.verifier;
         let preview = if blob.is_previewable() || blob.is_variable() {
             if blob.is_video() {
                 // `attachment.preview(format: :webp, resize_to_limit: [...])`
@@ -327,7 +327,7 @@ impl<'a> Presenter<'a> {
     fn thumb_path(&self, blob: &campfire_storage::Blob) -> Result<String> {
         let thumb = Variation::resize_to_limit(THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT, None);
         let variation = if blob.is_previewable() { thumb } else { self.storage.variation_for(blob, &thumb).map_err(storage_error)? };
-        Ok(campfire_storage::paths::representation_redirect_path(&*self.storage.verifier, blob, &variation))
+        Ok(campfire_storage::paths::representation_redirect_path(&self.storage.verifier, blob, &variation))
     }
 
     /// `message.body.to_s`: the stored rich text rendered inside its layout.

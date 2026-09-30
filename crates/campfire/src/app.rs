@@ -19,7 +19,7 @@ use campfire_kit::exceptions::ErrorPages;
 use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, SharedClock, SharedCrypto};
 use campfire_storage::{DiskService, Storage};
 use campfire_views::fragment_cache::{FragmentCache, Scoped};
-use rails_compat::{MessageVerifier, Secrets};
+use rails_compat::Secrets;
 
 use crate::config::Config;
 use crate::rich_text::AppRichText;
@@ -87,10 +87,8 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
     // config/puma.rb: `Membership.disconnect_all` when the server boots.
     db.write(|tx| campfire_db::Membership::disconnect_all(tx).map(|_| ())).await?;
 
-    let storage = Arc::new(Storage::new(
-        DiskService::new(&config.storage.files, "local"),
-        Arc::new(ActiveStorageVerifier(rails_compat::app_verifier(&secrets, "ActiveStorage"))),
-    ));
+    let storage =
+        Arc::new(Storage::new(DiskService::new(&config.storage.files, "local"), rails_compat::app_verifier(&secrets, "ActiveStorage")));
 
     let cable_config = campfire_cable::Config { assume_ssl: !config.disable_ssl, ..campfire_cable::Config::default() };
     let deps = channels::Deps { db: db.clone(), secrets: secrets.clone(), crypto: crypto.clone(), clock: clock.clone() };
@@ -186,19 +184,6 @@ fn error_pages() -> ErrorPages {
         let request = campfire_assets::StaticRequest { method: "GET", path: &path, ..Default::default() };
         campfire_assets::serve(&request).map(|page| (status, page.body.into_owned().into()))
     }))
-}
-
-/// `Rails.application.message_verifier("ActiveStorage")` for campfire_storage.
-struct ActiveStorageVerifier(MessageVerifier);
-
-impl campfire_storage::Verifier for ActiveStorageVerifier {
-    fn generate(&self, data_json: &str, purpose: &str, expires_at: Option<jiff::Timestamp>) -> String {
-        self.0.generate_raw(data_json, Some(purpose), expires_at)
-    }
-
-    fn verified(&self, message: &str, purpose: &str, now: jiff::Timestamp) -> Option<String> {
-        self.0.verify_raw(message, Some(purpose), now).ok()
-    }
 }
 
 /// The process clock (frozen with `CAMPFIRE_FROZEN_TIME`) as the models' clock.

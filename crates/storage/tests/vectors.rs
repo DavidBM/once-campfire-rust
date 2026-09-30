@@ -9,12 +9,10 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use campfire_storage::marshal::Value;
-use campfire_storage::{
-    AppMessageVerifier, Blob, DiskService, Filename, Json, Storage, Variation, Verifier, disk, disposition, marcel, paths,
-};
+use campfire_storage::{Blob, DiskService, Filename, Json, Storage, Variation, disk, disposition, marcel, paths};
+use rails_compat::{MessageVerifier, Secrets};
 use rusqlite::Connection;
 use serde_json::Value as J;
 
@@ -35,14 +33,11 @@ fn fixture(name: &str) -> PathBuf {
     repo_root().join("reference/test/fixtures/files").join(name)
 }
 
-/// `Rails.application.key_generator.generate_key("ActiveStorage")`: PBKDF2-HMAC-SHA256, 1000
-/// iterations, 64 bytes.
-fn verifier() -> AppMessageVerifier {
+/// `ActiveStorage.verifier`, built as the app builds it (crates/campfire/src/app.rs).
+fn verifier() -> MessageVerifier {
     let env = std::fs::read_to_string(repo_root().join("parity/.env.reference")).unwrap();
     let secret_key_base = env.lines().find_map(|l| l.strip_prefix("SECRET_KEY_BASE=")).unwrap();
-    let mut key = vec![0u8; 64];
-    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(secret_key_base.as_bytes(), b"ActiveStorage", 1000, &mut key);
-    AppMessageVerifier::new(key)
+    rails_compat::app_verifier(&Secrets::new(secret_key_base), "ActiveStorage")
 }
 
 fn typed(value: &J) -> Value {
@@ -100,10 +95,10 @@ fn verifier_messages_and_disk_urls() {
     let verifier = verifier();
     let v = &vectors()["verifier"];
     let expires_at: jiff::Timestamp = "2030-01-02T03:04:05.678Z".parse().unwrap();
-    assert_eq!(verifier.generate("\"x\"", "p", Some(expires_at)), v["expiring"]);
-    assert_eq!(verifier.verified(v["expiring"].as_str().unwrap(), "p", now()).as_deref(), Some("\"x\""));
-    assert_eq!(verifier.verified(v["expiring"].as_str().unwrap(), "p", expires_at), None);
-    assert_eq!(verifier.verified(v["expiring"].as_str().unwrap(), "q", now()), None);
+    assert_eq!(verifier.generate_raw("\"x\"", Some("p"), Some(expires_at)), v["expiring"]);
+    assert_eq!(verifier.verify_raw(v["expiring"].as_str().unwrap(), Some("p"), now()).ok().as_deref(), Some("\"x\""));
+    assert!(verifier.verify_raw(v["expiring"].as_str().unwrap(), Some("p"), expires_at).is_err());
+    assert!(verifier.verify_raw(v["expiring"].as_str().unwrap(), Some("q"), now()).is_err());
 
     let service = DiskService::new("/tmp/unused", "local");
     let weird = Filename::new("weird & <name> ünï.png");
@@ -288,7 +283,7 @@ fn pipeline_matches_the_reference() {
     let vectors = vectors();
     let files = vectors_path().parent().unwrap().join("storage");
     let root = tempfile::tempdir().unwrap();
-    let storage = Storage::new(DiskService::new(root.path(), "local"), Arc::new(verifier()));
+    let storage = Storage::new(DiskService::new(root.path(), "local"), verifier());
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(SCHEMA).unwrap();
     let mut comparison = Comparison::new(&vectors["versions"]);
@@ -365,7 +360,7 @@ fn pipeline_matches_the_reference() {
 #[test]
 fn staging_a_file_unfurls_it_as_its_bytes_would() {
     let root = tempfile::tempdir().unwrap();
-    let storage = Storage::new(DiskService::new(root.path(), "local"), Arc::new(verifier()));
+    let storage = Storage::new(DiskService::new(root.path(), "local"), verifier());
     for m in vectors()["messages"].as_array().unwrap() {
         let name = m["fixture"].as_str().unwrap();
         let declared = m["declared_type"].as_str();
@@ -380,7 +375,7 @@ fn staging_a_file_unfurls_it_as_its_bytes_would() {
 #[test]
 fn a_staged_file_is_deleted_unless_kept() {
     let root = tempfile::tempdir().unwrap();
-    let storage = Storage::new(DiskService::new(root.path(), "local"), Arc::new(verifier()));
+    let storage = Storage::new(DiskService::new(root.path(), "local"), verifier());
     let dropped = storage.stage_bytes(b"dropped", Filename::new("a.txt"), None).unwrap();
     let dropped_path = storage.service.path_for(&dropped.blob().key);
     assert!(dropped_path.exists());

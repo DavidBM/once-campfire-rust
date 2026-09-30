@@ -84,7 +84,7 @@ pub async fn representations_proxy(c: &mut Ctx) -> Result {
 async fn set_blob(c: &mut Ctx) -> Result<Blob> {
     let signed_id = c.param_str("signed_blob_id").or_else(|| c.param_str("signed_id")).unwrap_or("").to_string();
     let storage = c.app().storage.clone();
-    let Some(blob_id) = paths::verify_signed_blob_id(&*storage.verifier, &signed_id, c.now()) else {
+    let Some(blob_id) = paths::verify_signed_blob_id(&storage.verifier, &signed_id, c.now()) else {
         return halt(head(StatusCode::NOT_FOUND));
     };
     c.app().db.read(move |conn| Blob::find(conn, blob_id).map_err(storage_error)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
@@ -96,7 +96,7 @@ async fn set_blob(c: &mut Ctx) -> Result<Blob> {
 async fn set_representation(c: &mut Ctx, blob: Blob) -> Result<Blob> {
     let storage = c.app().storage.clone();
     let key = c.param_str("variation_key").unwrap_or("").to_string();
-    let variation = match Variation::decode(&*storage.verifier, &key, c.now()) {
+    let variation = match Variation::decode(&storage.verifier, &key, c.now()) {
         Ok(variation) => variation,
         Err(campfire_storage::Error::InvalidSignature) => return halt(head(StatusCode::NOT_FOUND)),
         Err(error) => return Err(Error::internal(error)),
@@ -251,7 +251,7 @@ fn blob_url(c: &Ctx, blob: &Blob, disposition: Option<&str>) -> String {
     let content_type = content_types::for_serving(blob.content_type());
     let disposition = content_types::forced_disposition(blob.content_type()).or(disposition).unwrap_or("inline");
     let expires_at = c.now() + jiff::SignedDuration::from_secs(SERVICE_URLS_EXPIRE_IN);
-    let path = storage.service.url_path(&*storage.verifier, &blob.key, Some(expires_at), &blob.filename, Some(content_type), disposition);
+    let path = storage.service.url_path(&storage.verifier, &blob.key, Some(expires_at), &blob.filename, Some(content_type), disposition);
     c.url_for(&path)
 }
 
@@ -399,7 +399,7 @@ pub async fn disk_show(c: &mut Ctx) -> Result {
 fn disk_serve(c: &mut Ctx) -> Result {
     let storage = c.app().storage.clone();
     let encoded_key = c.param_str("encoded_key").unwrap_or("").to_string();
-    let Some(key) = disk::decode_verified_key(&*storage.verifier, &encoded_key, c.now()) else {
+    let Some(key) = disk::decode_verified_key(&storage.verifier, &encoded_key, c.now()) else {
         return Ok(c.head(StatusCode::NOT_FOUND));
     };
     let request = file_server::Request {
@@ -430,7 +430,7 @@ pub async fn disk_update(c: &mut Ctx) -> Result {
     require_active_storage_authentication(c).await?;
     let storage = c.app().storage.clone();
     let encoded_token = c.param_str("encoded_token").unwrap_or("").to_string();
-    let Some(token) = disk::decode_verified_token(&*storage.verifier, &encoded_token, c.now()) else {
+    let Some(token) = disk::decode_verified_token(&storage.verifier, &encoded_token, c.now()) else {
         return Ok(c.head(StatusCode::NOT_FOUND));
     };
     if !acceptable_content(c, &token) {
@@ -505,14 +505,14 @@ pub async fn direct_uploads_create(c: &mut Ctx) -> Result {
 
     let expires_at = now + jiff::SignedDuration::from_secs(SERVICE_URLS_EXPIRE_IN);
     let url = c.url_for(&storage.service.url_path_for_direct_upload(
-        &*storage.verifier,
+        &storage.verifier,
         &blob.key,
         expires_at,
         content_type.as_deref(),
         byte_size,
         &checksum,
     ));
-    let signed_id = paths::signed_blob_id(&*storage.verifier, blob.id, None);
+    let signed_id = paths::signed_blob_id(&storage.verifier, blob.id, None);
     let json = direct_upload_json(&blob, &signed_id, &url, content_type.as_deref());
     Ok(c.render_as(StatusCode::OK, campfire_kit::response::JSON_UTF8, json))
 }

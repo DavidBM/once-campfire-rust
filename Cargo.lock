@@ -495,17 +495,14 @@ name = "campfire_storage"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "hmac",
  "jiff",
  "md-5",
- "pbkdf2",
  "rails_compat",
  "rand 0.9.5",
  "rusqlite",
  "serde",
  "serde_json",
  "sha1",
- "sha2",
  "tempfile",
  "thiserror",
 ]

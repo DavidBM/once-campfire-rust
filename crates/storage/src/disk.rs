@@ -6,11 +6,12 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use rails_compat::MessageVerifier;
+
 use crate::disposition::{content_disposition_with, escape_path, escape_segment};
 use crate::filename::Filename;
 use crate::json::Json;
 use crate::key::checksum_file;
-use crate::verifier::Verifier;
 use crate::{Error, Result};
 
 #[derive(Clone, Debug)]
@@ -103,7 +104,7 @@ impl DiskService {
     /// (the caller prefixes `ActiveStorage::Current.url_options`' protocol and host).
     pub fn url_path(
         &self,
-        verifier: &dyn Verifier,
+        verifier: &MessageVerifier,
         key: &str,
         expires_at: Option<jiff::Timestamp>,
         filename: &Filename,
@@ -117,14 +118,14 @@ impl DiskService {
             ("content_type".into(), content_type.map_or(Json::Null, Json::from)),
             ("service_name".into(), self.name.as_str().into()),
         ]);
-        let encoded_key = verifier.generate(&payload.encode(), "blob_key", expires_at);
+        let encoded_key = verifier.generate_raw(&payload.encode(), Some("blob_key"), expires_at);
         format!("/rails/active_storage/disk/{}/{}", escape_segment(&encoded_key), escape_path(&sanitized))
     }
 
     /// The path of `url_for_direct_upload`.
     pub fn url_path_for_direct_upload(
         &self,
-        verifier: &dyn Verifier,
+        verifier: &MessageVerifier,
         key: &str,
         expires_at: jiff::Timestamp,
         content_type: Option<&str>,
@@ -138,7 +139,7 @@ impl DiskService {
             ("checksum".into(), checksum.into()),
             ("service_name".into(), self.name.as_str().into()),
         ]);
-        let token = verifier.generate(&payload.encode(), "blob_token", Some(expires_at));
+        let token = verifier.generate_raw(&payload.encode(), Some("blob_token"), Some(expires_at));
         format!("/rails/active_storage/disk/{}", escape_segment(&token))
     }
 
@@ -160,8 +161,8 @@ impl DiskService {
 }
 
 /// `DiskController#decode_verified_key`.
-pub fn decode_verified_key(verifier: &dyn Verifier, encoded_key: &str, now: jiff::Timestamp) -> Option<DiskKey> {
-    let data = Json::parse(&verifier.verified(encoded_key, "blob_key", now)?).ok()?;
+pub fn decode_verified_key(verifier: &MessageVerifier, encoded_key: &str, now: jiff::Timestamp) -> Option<DiskKey> {
+    let data = Json::parse(&verifier.verify_raw(encoded_key, Some("blob_key"), now).ok()?).ok()?;
     Some(DiskKey {
         key: data.get("key")?.as_str()?.to_string(),
         disposition: data.get("disposition")?.as_str()?.to_string(),
@@ -171,8 +172,8 @@ pub fn decode_verified_key(verifier: &dyn Verifier, encoded_key: &str, now: jiff
 }
 
 /// `DiskController#decode_verified_token`.
-pub fn decode_verified_token(verifier: &dyn Verifier, encoded_token: &str, now: jiff::Timestamp) -> Option<DiskToken> {
-    let data = Json::parse(&verifier.verified(encoded_token, "blob_token", now)?).ok()?;
+pub fn decode_verified_token(verifier: &MessageVerifier, encoded_token: &str, now: jiff::Timestamp) -> Option<DiskToken> {
+    let data = Json::parse(&verifier.verify_raw(encoded_token, Some("blob_token"), now).ok()?).ok()?;
     Some(DiskToken {
         key: data.get("key")?.as_str()?.to_string(),
         content_type: data.get("content_type").and_then(Json::as_str).map(str::to_string),
