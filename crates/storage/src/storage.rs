@@ -78,8 +78,7 @@ impl Storage {
     // --- File work: no connection, blocking -------------------------------------------------------
 
     /// The file half of `Blob.create_and_upload!(io:, filename:, content_type:)` as attaching an
-    /// uploaded file does (`identify: true`): unfurls the file at `source` and uploads it with
-    /// checksum verification.
+    /// uploaded file does (`identify: true`): unfurls the file at `source` and uploads it.
     pub fn stage_file(&self, source: &Path, filename: Filename, declared_type: Option<&str>) -> Result<Staged> {
         let blob = NewBlob::unfurl_file(source, filename, declared_type, self.service.name(), true)?;
         self.stage(blob, std::fs::File::open(source)?)
@@ -91,10 +90,14 @@ impl Storage {
         self.stage(blob, data)
     }
 
+    /// Copies the blob's bytes into the service. Unlike `DiskService#upload`, the copy isn't read
+    /// back to verify its checksum: the checksum was just computed from these same local bytes, so
+    /// reading the copy back would only compare them with themselves, and [`Self::open`] still
+    /// verifies the file before it's analyzed or made into a variant or poster. The `Staged` comes
+    /// first, so a failed copy deletes what it wrote.
     fn stage(&self, blob: NewBlob, reader: impl std::io::Read) -> Result<Staged> {
-        let checksum = blob.checksum.clone();
         let staged = Staged { blob, service: self.service.clone(), kept: false };
-        self.service.upload(&staged.blob.key, reader, Some(&checksum))?;
+        self.service.upload(&staged.blob.key, reader, None)?;
         Ok(staged)
     }
 
@@ -311,4 +314,32 @@ fn analyzed(metadata: &Json, mut extracted: Json) -> Json {
     let mut metadata = metadata.clone();
     metadata.merge(&extracted);
     metadata
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use super::*;
+
+    struct Broken;
+
+    impl Read for Broken {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("the disk went away"))
+        }
+    }
+
+    #[test]
+    fn a_copy_that_fails_leaves_no_file_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let verifier = rails_compat::app_verifier(&rails_compat::Secrets::new("test"), "ActiveStorage");
+        let storage = Storage::new(DiskService::new(root.path(), "local"), verifier);
+        let blob = NewBlob::unfurl(b"partial and more", Filename::new("a.txt"), None, "local", true);
+        let key = blob.key.clone();
+
+        let Err(Error::Io(error)) = storage.stage(blob, b"partial".chain(Broken)) else { panic!("a broken copy was staged") };
+        assert_eq!(error.to_string(), "the disk went away");
+        assert!(!storage.service.exist(&key));
+    }
 }
