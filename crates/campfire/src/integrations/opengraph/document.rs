@@ -62,7 +62,9 @@ mod tests {
     }
 
     /// Pages as large as a fetch allows, built to make a parser do quadratic work, parse in time
-    /// proportional to their size.
+    /// proportional to their size. Quadratic parsing took 14.7 s for 1.4 MB, so it would take
+    /// minutes here; the bound leaves room for a debug build on a busy CI runner, which has taken
+    /// just over 1 s.
     #[test]
     fn parses_pathological_pages_quickly() {
         let limit = super::super::fetch::MAX_BODY_SIZE;
@@ -89,7 +91,7 @@ mod tests {
             let started = std::time::Instant::now();
             let found = opengraph_attributes(Some(page.as_bytes()));
             assert_eq!(found[0].0, "title");
-            assert!(started.elapsed() < std::time::Duration::from_secs(1), "{:?} for {}…", started.elapsed(), &page[..60]);
+            assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?} for {}…", started.elapsed(), &page[..60]);
         }
     }
 }
