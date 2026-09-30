@@ -423,10 +423,10 @@ Deliberate:
   the same missing variant may both transform it: the first to save wins and the other's file is
   deleted. ffmpeg is stopped after 60 seconds of drawing a poster and ffprobe after 30 seconds of
   reading a file, which Rails doesn't limit.
-- **Floats in blob metadata have the shortest digits.** Rails writes them with the json gem's
-  Grisu2, which now and then picks a longer form of the same number (`250.70174600000001` for
-  `250.701746`); the app writes the shortest one, laid out the same way. Both read back as the
-  same number.
+- **Floats in JSON have the shortest digits.** Rails writes them with the json gem's Grisu2,
+  which now and then picks a longer form of the same number (`250.70174600000001` for
+  `250.701746`); the app writes the shortest one, laid out the same way, in blob metadata and
+  everywhere else it writes JSON. Both read back as the same number.
 - **Passwords are hashed and checked outside the database.** bcrypt (about 250 ms) runs before the
   write that saves a password, and a sign-in looks the user up and then verifies the password after
   releasing the database connection. An unknown email address still costs one bcrypt, as in Rails.

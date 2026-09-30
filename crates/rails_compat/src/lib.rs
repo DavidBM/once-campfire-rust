@@ -6,7 +6,9 @@
 //! The public signatures below are the interface other crates build against.
 
 pub mod cookies;
+pub mod encoding;
 pub mod global_id;
+pub mod json;
 pub mod key_generator;
 pub mod message_encryptor;
 pub mod message_verifier;
@@ -14,8 +16,6 @@ pub mod password;
 pub mod signed_id;
 pub mod turbo;
 
-mod encoding;
-mod json;
 mod marshal;
 mod metadata;
 

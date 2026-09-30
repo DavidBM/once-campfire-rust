@@ -2,7 +2,7 @@
 //!
 //! Frames are Ruby hashes run through `ActiveSupport::JSON.encode`, so key order is the order
 //! the hash literal is written in `Connection::Base` and `Channel::Base`.
-use crate::json;
+use rails_compat::json;
 
 /// Offered in `Sec-WebSocket-Protocol`; the first one the client lists that's in here wins
 /// (websocket-driver's hybi negotiation walks the client's list, not the server's).

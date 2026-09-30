@@ -7,7 +7,6 @@
 //! `reference/Gemfile.lock`.
 pub mod channel;
 mod connection;
-pub mod json;
 pub mod naming;
 pub mod protocol;
 pub mod pubsub;

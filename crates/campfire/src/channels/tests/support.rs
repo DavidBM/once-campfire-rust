@@ -190,7 +190,7 @@ pub fn rejection(identifier: &str) -> String {
 
 /// The frame a broadcast of `message` (already ActiveSupport-JSON-encoded) arrives in.
 pub fn delivery(identifier: &str, encoded_message: &str) -> String {
-    format!(r#"{{"identifier":{},"message":{}}}"#, campfire_cable::json::encode(identifier), encoded_message)
+    format!(r#"{{"identifier":{},"message":{}}}"#, rails_compat::json::encode(identifier), encoded_message)
 }
 
 pub struct Client {

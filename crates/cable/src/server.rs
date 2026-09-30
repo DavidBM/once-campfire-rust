@@ -7,13 +7,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use rails_compat::json;
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
 
 use crate::channel::Channel;
 use crate::pubsub::{Frame, Hub};
 use crate::socket::Handshake;
-use crate::{connection, json, naming, protocol};
+use crate::{connection, naming, protocol};
 
 /// `config.action_cable.*` as the production reference runs it.
 #[derive(Debug, Clone)]
@@ -200,13 +201,8 @@ impl<U: Send + Sync + 'static> Server<U> {
 
     /// `ActionCable.server.broadcast(broadcasting, message)`.
     pub fn broadcast<T: Serialize + ?Sized>(&self, broadcasting: &str, message: &T) -> usize {
-        self.broadcast_json(broadcasting, json::encode(message))
-    }
-
-    /// Broadcasts an already-encoded JSON document.
-    pub fn broadcast_json(&self, broadcasting: &str, encoded: String) -> usize {
         tracing::debug!(broadcasting, "[ActionCable] Broadcasting");
-        self.inner.hub.broadcast(broadcasting, &json::escape_html_entities(encoded))
+        self.inner.hub.broadcast(broadcasting, &json::encode(message))
     }
 
     /// `SomeChannel.broadcast_to(broadcastables, message)`.
