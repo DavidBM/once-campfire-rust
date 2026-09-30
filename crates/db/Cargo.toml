@@ -24,7 +24,7 @@ base64 = { workspace = true, optional = true }
 
 [features]
 # `campfire_db::fixtures`, the reference's test fixtures loaded into a database, and
-# `campfire_db::testing`, stand-ins for the app's clock, event sink and rich text.
+# `campfire_db::testing`: `Env::default`, event sinks and a rich-text stand-in.
 test-support = ["dep:serde_yaml", "dep:crc32fast", "dep:base64"]
 
 [dev-dependencies]
