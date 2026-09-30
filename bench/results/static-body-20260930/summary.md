@@ -37,12 +37,24 @@ the map 562 vs 546 ns): within this host's noise.
 
 ## Over HTTP
 
-To be added by the coordinator. Through the front server, responses up to `MAX_CACHE_ITEM_SIZE`
-(1 MB) come from its response cache after the first request. The limit applies to the body it
-records, so every asset's gzipped response is cached, the map's included (it gzips to 426 KB), and
-only identity requests for the source map reach `static_response` there. lexxy.js and _reset.css
-have to be requested from the bare app port, where gzip's per-request deflate of a large asset
-(about 9 ms for lexxy.js) hides the copy, so the comparison is with `--gzip 0`.
+Measured in [`static-assets-http-20260930`](../static-assets-http-20260930/summary.md): main at
+`0dbd10d` (the same code as `d93d3dd`) against `22bd7db`. Three native builds were interleaved over
+three reps, 8 s per cell, with `--gzip 0`. Medians:
+
+| Request | Clients | main req/s | branch req/s | main CPU/req | branch CPU/req |
+|---|---|---|---|---|---|
+| lexxy.js (923 KB), bare app, identity | 1 | 6,771 | 6,752 (1.00×) | 68.8 µs | 51.9 µs (-25%) |
+| lexxy.js (923 KB), bare app, identity | 16 | 29,977 | 33,646 (1.12×) | 86.0 µs | 66.2 µs (-23%) |
+| lexxy.js.map (2.18 MB), bare app, identity | 1 | 2,738 | 2,732 (1.00×) | 141.6 µs | 107.1 µs (-24%) |
+| lexxy.js.map (2.18 MB), bare app, identity | 16 | 6,619 | 7,733 (1.17×) | 312.2 µs | 196.6 µs (-37%) |
+| _reset.css (1.2 KB), bare app, identity | 1 | 73,961 | 74,540 (1.01×) | 7.8 µs | 7.7 µs (-1%) |
+| _reset.css (1.2 KB), bare app, identity | 16 | 489,498 | 502,821 (1.03×) | 6.2 µs | 6.1 µs (-2%) |
+| lexxy.js.map (2.18 MB), front server, identity | 1 | 2,695 | 3,083 (1.14×) | 149.3 µs | 115.3 µs (-23%) |
+| lexxy.js.map (2.18 MB), front server, identity | 16 | 6,546 | 7,808 (1.19×) | 324.7 µs | 208.8 µs (-36%) |
+
+Serving a large asset without the copy saves 23–37% of its CPU per request, for 12–19% more
+throughput at 16 clients. A 1.2 KB stylesheet is unchanged. At one client, throughput moves less
+than CPU does.
 
 In production, with the front on, the saving applies to front-cache misses, range requests (which
 bypass the cache), identity requests for files over 1 MB and the bare app, not to every asset
