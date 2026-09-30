@@ -9,12 +9,12 @@
 //! and `>` in the text is a tag's, so auto_link only ever inserts links between tags.
 
 use regex::Regex;
+use ruby_compat::erb::html_escape;
 use std::sync::LazyLock;
 
 use crate::dom::ParseError;
 use crate::ruby::{is_blank, url_encode};
 use crate::sanitizer::{SafeList, sanitize, sanitize_with_escaped_attribute_brackets};
-use ruby_compat::erb::html_escape;
 
 /// `AUTO_LINK_RE`. Ruby's `\s` and `\w` are ASCII-only.
 static AUTO_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {

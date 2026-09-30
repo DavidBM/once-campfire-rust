@@ -3,8 +3,6 @@
 
 use campfire_kit::Ctx;
 
-use crate::concerns::ruby_to_i;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
     /// `page.number`
@@ -82,7 +80,7 @@ impl Page {
 /// `param.to_i > 0 ? param.to_i : 1`
 fn page_number_from(param: Option<&str>) -> i64 {
     // Capped, so the page arithmetic can't overflow on a huge `?page=`.
-    param.map(ruby_to_i).unwrap_or(0).clamp(1, 1_000_000_000)
+    param.map(ruby_compat::to_i).unwrap_or(0).clamp(1, 1_000_000_000)
 }
 
 /// Addressable's `uri.query_values = (uri.query_values || {}).merge("page" => page)`: the query
@@ -183,7 +181,7 @@ mod tests {
         assert_eq!(Page::new(Some("abc"), 10, &[5]).number, 1);
         assert_eq!(Page::new(Some("-2"), 10, &[5]).number, 1);
         assert_eq!(Page::new(Some(" 2x"), 10, &[5]).number, 2);
-        assert_eq!(ruby_to_i("1_0"), 10);
+        assert_eq!(Page::new(Some("1_0"), 100, &[5]).number, 10);
     }
 
     #[test]

@@ -11,11 +11,12 @@ use askama::Template;
 use campfire_db::{Account, NewUser, User};
 use campfire_kit::{Ctx, Error, ParamMap, Result, StatusCode, format, halt, permit_keys};
 use campfire_views::users;
+use ruby_compat::integer_cast;
 
 use super::presenters::attachments::{self, Assignment, Record};
 use super::presenters::{self, view_context};
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, cast_integer};
+use crate::concerns::{self, Before};
 use crate::controllers::presenters::page::framed_page;
 
 /// `require_unauthenticated_access only: %i[ new create ]`, `before_action :verify_join_code`
@@ -104,7 +105,7 @@ fn show_page<'a>(ctx: &'a campfire_views::ViewContext<'a>, user: &users::UserSum
 
 /// `User.find(params[key])`: 404 when there's no such user.
 pub async fn find_user(c: &Ctx, key: &str) -> Result<User> {
-    let id = c.param_str(key).and_then(cast_integer).ok_or(Error::NotFound)?;
+    let id = c.param_str(key).and_then(integer_cast).ok_or(Error::NotFound)?;
     c.app().db.read(move |conn| User::find_by_id(conn, id)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
 }
 

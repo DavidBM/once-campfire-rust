@@ -9,10 +9,11 @@ use std::sync::Mutex;
 use campfire_db::{CachedStatements, Connection, PushSubscription};
 use campfire_kit::{Ctx, Error, ParamMap, Result, StatusCode, format, permit_keys};
 use campfire_views::users;
+use ruby_compat::integer_cast;
 use rusqlite::types::Value;
 
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, cast_integer};
+use crate::concerns::{self, Before};
 use crate::controllers::presenters;
 use crate::controllers::presenters::page::framed_page;
 use crate::integrations::net::{Network, guard};
@@ -79,7 +80,7 @@ pub async fn create(c: &mut Ctx) -> Result {
 pub async fn destroy(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     let user_id = concerns::require_current_user(c)?.id;
-    if let Some(id) = c.param_str("id").and_then(cast_integer) {
+    if let Some(id) = c.param_str("id").and_then(integer_cast) {
         c.app()
             .db
             .write(move |tx| match PushSubscription::find(tx.conn(), id) {

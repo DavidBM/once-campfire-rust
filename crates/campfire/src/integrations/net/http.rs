@@ -256,9 +256,9 @@ impl Response {
         let header = self.header("content-type")?;
         let media = header.split(';').next().unwrap_or("");
         let mut parts = media.split('/');
-        let main = parts.next().unwrap_or("").trim_matches(ruby_strip_char);
+        let main = ruby_compat::strip(parts.next().unwrap_or(""));
         match parts.next() {
-            Some(sub) => Some(format!("{main}/{}", sub.trim_matches(ruby_strip_char))),
+            Some(sub) => Some(format!("{main}/{}", ruby_compat::strip(sub))),
             None => Some(main.to_string()),
         }
     }
@@ -312,11 +312,6 @@ impl Response {
             _ => None,
         }
     }
-}
-
-/// Ruby's `String#strip`: whitespace and NUL.
-fn ruby_strip_char(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r' | '\0')
 }
 
 /// `Zlib::Inflate.new(32 + Zlib::MAX_WBITS)`: gzip or zlib, detected from the header.

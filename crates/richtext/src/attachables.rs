@@ -3,13 +3,14 @@
 
 use rails_compat::encoding;
 use regex::Regex;
+use ruby_compat::erb::html_escape;
+use ruby_compat::strip;
 use std::sync::LazyLock;
 
 use crate::Error;
 use crate::dom::{Dom, NodeId};
-use crate::ruby::{is_blank, presence, strip, truncate};
+use crate::ruby::{is_blank, presence, truncate};
 use crate::uri::{self, UriError};
-use ruby_compat::erb::html_escape;
 
 pub const MENTION_CONTENT_TYPE: &str = "application/vnd.campfire.mention";
 pub const OPENGRAPH_EMBED_CONTENT_TYPE: &str = "application/vnd.actiontext.opengraph-embed";

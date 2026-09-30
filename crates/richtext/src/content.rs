@@ -4,13 +4,14 @@
 //! string, `inner_html=`, a filter returning HTML) does the same here, in the same parse context,
 //! because those round trips are where the output takes its shape.
 
+use ruby_compat::strip;
 use serde_json::Value;
 
 use crate::Error;
 use crate::attachables::{self, Attachable, Attachment, PlainTextRepresentation, RenderContext, attachment_from_node};
 use crate::dom::{Dom, NodeId};
 use crate::plain_text;
-use crate::ruby::{self, is_blank, presence, strip};
+use crate::ruby::{self, is_blank, presence};
 use crate::sanitizer::{self, ATTACHMENT_ATTRIBUTES, SafeList};
 
 pub const ATTACHMENT_TAG: &str = "action-text-attachment";

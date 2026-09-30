@@ -2,16 +2,6 @@
 
 use serde_json::Value;
 
-/// Ruby's whitespace for `String#strip`: NUL, `\t`, `\n`, `\v`, `\f`, `\r` and space.
-fn is_strip_whitespace(c: char) -> bool {
-    matches!(c, '\0' | '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ')
-}
-
-/// `String#strip`.
-pub fn strip(s: &str) -> &str {
-    s.trim_matches(is_strip_whitespace)
-}
-
 /// Active Support's `String#blank?`: empty or only Unicode whitespace (`/\A[[:space:]]*\z/`).
 pub fn is_blank(s: &str) -> bool {
     s.chars().all(char::is_whitespace)
@@ -299,8 +289,6 @@ mod tests {
 
     #[test]
     fn matches_ruby() {
-        assert_eq!(strip("\0 \t x \0\n"), "x");
-        assert_eq!(strip(" \u{a0}x\u{a0} "), "\u{a0}x\u{a0}");
         assert_eq!(chomp_newlines("a\r\n\r\n"), "a");
         assert_eq!(chomp_newlines("a\n\r"), "a\n\r");
         assert_eq!(ruby_float_to_s(1e20), "1.0e+20");

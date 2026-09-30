@@ -56,10 +56,17 @@ mod tests {
     #[test]
     fn to_i_like_ruby() {
         // `String#to_i` in the reference.
-        assert_eq!(to_i("\t\n\u{b}\u{c}\r +12abc"), 12);
+        assert_eq!(to_i("1717243200000"), 1717243200000);
+        assert_eq!(to_i(" +12abc"), 12);
+        assert_eq!(to_i("\t\n\u{b}\u{c}\r 7"), 7);
         assert_eq!(to_i("\u{a0}5"), 0);
+        assert_eq!(to_i("abc"), 0);
+        assert_eq!(to_i("-5"), -5);
+        assert_eq!(to_i("--5"), 0);
         assert_eq!(to_i("5_6"), 56);
         assert_eq!(to_i("5__6"), 5);
+        assert_eq!(to_i("_5"), 0);
+        assert_eq!(to_i("0__5"), 0);
         assert_eq!(to_i("-0d5"), -5);
         assert_eq!(to_i("0d_5"), 0);
         assert_eq!(to_i("0x5"), 0);
@@ -72,13 +79,40 @@ mod tests {
     #[test]
     fn casts_like_active_record() {
         // `Room.type_for_attribute(:id).serialize(s)` in the reference; a RangeError is None.
-        assert_eq!(integer_cast("\u{b}-0d7"), Some(-7));
-        assert_eq!(integer_cast("12abc"), Some(12));
-        assert_eq!(integer_cast("3000000000"), Some(3000000000));
-        assert_eq!(integer_cast("-9223372036854775808"), Some(i64::MIN));
-        assert_eq!(integer_cast("9223372036854775808"), None);
-        assert_eq!(integer_cast("\u{a0}5"), None);
-        assert_eq!(integer_cast("_5"), None);
-        assert_eq!(integer_cast("abc"), None);
+        for (value, id) in [
+            ("12", Some(12)),
+            ("12abc", Some(12)),
+            (" -3", Some(-3)),
+            (" +12abc", Some(12)),
+            ("\t\n\u{b}\u{c}\r 7", Some(7)),
+            ("\u{b}-0d7", Some(-7)),
+            ("0d12", Some(12)),
+            ("0D12", Some(12)),
+            ("0d", Some(0)),
+            ("0d_5", Some(0)),
+            ("0d0_5", Some(5)),
+            ("5_6", Some(56)),
+            ("5__6", Some(5)),
+            ("1_000", Some(1000)),
+            ("0x5", Some(0)),
+            ("-0", Some(0)),
+            ("5\0", Some(5)),
+            ("3000000000", Some(3000000000)),
+            ("9223372036854775807", Some(i64::MAX)),
+            ("-9223372036854775808", Some(i64::MIN)),
+            ("9223372036854775808", None),
+            ("-9223372036854775809", None),
+            ("99999999999999999999", None),
+            ("\u{a0}5", None),
+            ("\0 5", None),
+            ("_5", None),
+            ("--5", None),
+            ("+-5", None),
+            ("+", None),
+            ("abc", None),
+            ("", None),
+        ] {
+            assert_eq!(integer_cast(value), id, "{value:?}");
+        }
     }
 }

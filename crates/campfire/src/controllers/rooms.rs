@@ -16,9 +16,10 @@ pub mod refreshes;
 use askama::Template;
 use campfire_db::{Account, Message, Room, RoomType, User};
 use campfire_kit::{Ctx, Error, Redirect, Result, StatusCode, halt};
+use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, before_actions, cast_integer, require_current_user};
+use crate::concerns::{self, Before, before_actions, require_current_user};
 use crate::controllers::presenters::page::{self, Rendered, db_error};
 use crate::controllers::presenters::{Presenter, user_view};
 
@@ -95,7 +96,7 @@ pub(crate) async fn destroy_room(c: &mut Ctx, room: Room) -> Result {
 /// an alert.
 pub async fn set_room(c: &mut Ctx, scope: Scope) -> Result<Room> {
     let user_id = require_current_user(c)?.id;
-    let id = c.param_str("room_id").or_else(|| c.param_str("id")).and_then(cast_integer);
+    let id = c.param_str("room_id").or_else(|| c.param_str("id")).and_then(integer_cast);
     let room = match id {
         Some(id) => c.app().db.read(move |conn| Room::find_for_user(conn, user_id, id)).await.map_err(db_error)?,
         None => None,
@@ -152,8 +153,8 @@ pub(crate) fn room_name_param(c: &Ctx) -> Result<Option<Option<String>>> {
 /// `params.fetch(:user_ids, [])` as ids `User.where(id:)` can match.
 pub(crate) fn user_ids_param(c: &Ctx) -> Vec<i64> {
     match c.param("user_ids") {
-        Some(campfire_kit::Param::Array(values)) => values.iter().filter_map(|v| v.as_str()).filter_map(cast_integer).collect(),
-        Some(value) => value.as_str().and_then(cast_integer).into_iter().collect(),
+        Some(campfire_kit::Param::Array(values)) => values.iter().filter_map(|v| v.as_str()).filter_map(integer_cast).collect(),
+        Some(value) => value.as_str().and_then(integer_cast).into_iter().collect(),
         None => Vec::new(),
     }
 }
@@ -189,7 +190,7 @@ pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered>
 async fn render_show(c: &mut Ctx, room: Room) -> Result {
     let app = c.app().clone();
     let user = require_current_user(c)?.clone();
-    let message_id = c.param_str("message_id").and_then(cast_integer);
+    let message_id = c.param_str("message_id").and_then(integer_cast);
     let request_host = Some(c.request.host());
     let show = c
         .app()

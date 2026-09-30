@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 rails_compat.workspace = true
+ruby_compat.workspace = true
 campfire_kit.workspace = true
 campfire_routes.workspace = true
 campfire_db.workspace = true
