@@ -18,7 +18,7 @@ pub mod time;
 
 mod sql;
 
-pub use sql::CachedStatements;
+pub use sql::{CachedStatements, placeholders, query_all, query_one};
 
 pub use database::{Config, Database, Env, Tx, run_write};
 pub use error::{Error, Errors, Result};

@@ -8,7 +8,7 @@
 #[cfg(test)]
 mod tests;
 
-use campfire_db::{Account, CachedStatements, Connection, Membership, PushSubscription, Room, RoomType, User};
+use campfire_db::{Account, CachedStatements, Connection, Membership, PushSubscription, Room, RoomType, User, placeholders, query_all};
 use campfire_kit::Ctx;
 use campfire_views::Platform;
 use campfire_views::accounts::{Bot, BotForm, BotRoom, HelpContact};
@@ -17,7 +17,7 @@ use campfire_views::users::{
 };
 use rails_compat::Secrets;
 use rails_compat::global_id::{self, GlobalId};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use super::{attachments, epoch_string, to_fs_number, user_summary};
 
@@ -63,8 +63,7 @@ pub fn help_contact(conn: &Connection) -> campfire_db::Result<Option<HelpContact
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map(Some)
-        .or_else(no_rows)?;
+        .optional()?;
     Ok(owner.map(|(name, email_address)| HelpContact { name, email_address: email_address.unwrap_or_default() }))
 }
 
@@ -78,10 +77,6 @@ pub fn no_users(conn: &Connection) -> campfire_db::Result<bool> {
 pub fn touch(conn: &Connection, table: &str, id: i64, now: campfire_db::Timestamp) -> campfire_db::Result<()> {
     conn.execute_cached(&format!(r#"UPDATE "{table}" SET "updated_at" = ? WHERE "{table}"."id" = ?"#), params![now, id])?;
     Ok(())
-}
-
-fn no_rows<T>(error: rusqlite::Error) -> Result<Option<T>, rusqlite::Error> {
-    if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) }
 }
 
 // --- Users -----------------------------------------------------------------------------------------
@@ -203,10 +198,8 @@ fn direct_placeholder_users(conn: &Connection, secrets: &Secrets, user: &User) -
             r#"SELECT "memberships"."user_id" FROM "memberships" WHERE "memberships"."room_id" IN ({})"#,
             placeholders(direct_room_ids.len())
         );
-        let mut statement = conn.prepare_cached(&sql)?;
-        let ids = statement.query_map(rusqlite::params_from_iter(&direct_room_ids), |row| row.get::<_, i64>(0))?;
+        let ids: Vec<i64> = query_all(conn, &sql, rusqlite::params_from_iter(&direct_room_ids), |row| row.get(0))?;
         for id in ids {
-            let id = id?;
             if !exclude_user_ids.contains(&id) {
                 exclude_user_ids.push(id);
             }
@@ -221,7 +214,7 @@ fn direct_placeholder_users(conn: &Connection, secrets: &Secrets, user: &User) -
         r#"SELECT * FROM "users" WHERE "users"."status" = 0 AND "users"."id" NOT IN ({}) ORDER BY "users"."created_at" ASC LIMIT {limit}"#,
         placeholders(exclude_user_ids.len())
     );
-    let users = query_users(conn, &sql, rusqlite::params_from_iter(&exclude_user_ids))?;
+    let users = query_all(conn, &sql, rusqlite::params_from_iter(&exclude_user_ids), User::from_row)?;
     Ok(users.iter().map(|user| user_summary(secrets, user)).collect())
 }
 
@@ -232,7 +225,7 @@ fn direct_placeholder_users(conn: &Connection, secrets: &Secrets, user: &User) -
 pub fn account_users(conn: &Connection, can_administer: bool) -> campfire_db::Result<Vec<User>> {
     let status = if can_administer { r#""users"."status" IN (0, 2)"# } else { r#""users"."status" = 0"# };
     let sql = format!(r#"SELECT * FROM "users" WHERE {status} AND "users"."role" != 2 ORDER BY LOWER(name)"#);
-    query_users(conn, &sql, [])
+    query_all(conn, &sql, [], User::from_row)
 }
 
 /// A bot row for `accounts/bots/_bot`: its key and `bot.rooms.without_directs.ordered`.
@@ -275,17 +268,6 @@ pub fn push_subscription(subscription: &PushSubscription) -> PushSubscriptionVie
 /// `ORDER BY LOWER(name)`: SQLite lowercases ASCII only.
 pub fn sort_by_lower_name<T>(items: &mut [T], name: impl Fn(&T) -> &str) {
     items.sort_by_cached_key(|item| name(item).to_ascii_lowercase());
-}
-
-pub fn placeholders(count: usize) -> String {
-    vec!["?"; count].join(", ")
-}
-
-/// Users from a `SELECT "users".*` query.
-pub fn query_users(conn: &Connection, sql: &str, values: impl rusqlite::Params) -> campfire_db::Result<Vec<User>> {
-    let mut statement = conn.prepare_cached(sql)?;
-    let users = statement.query_map(values, User::from_row)?.collect::<Result<_, _>>()?;
-    Ok(users)
 }
 
 /// A permitted string attribute: `Some` when the key was given (its value may be nil).

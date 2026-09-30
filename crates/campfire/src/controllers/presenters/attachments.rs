@@ -18,6 +18,7 @@ use std::sync::Arc;
 use campfire_db::{CachedStatements, Connection, Event, Tx};
 use campfire_kit::{Error, Param, Result, UploadedFile};
 use campfire_storage::{Blob, Filename, Staged, Variation};
+use rusqlite::OptionalExtension;
 
 use crate::active_storage::{analyzed_metadata, keep_after_commit, stage_file, storage_error};
 use crate::app::App;
@@ -146,8 +147,7 @@ pub fn destroy(tx: &mut Tx<'_>, record: Record, name: &str) -> campfire_db::Resu
             rusqlite::params![record.record_type, record.id, name],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map(Some)
-        .or_else(|error| if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) })?;
+        .optional()?;
     let Some((attachment_id, blob_id)) = attachment else { return Ok(false) };
     tx.conn().execute_cached("DELETE FROM active_storage_attachments WHERE id = ?1", [attachment_id])?;
     super::accounts::touch(tx.conn(), record.table, record.id, tx.now())?;

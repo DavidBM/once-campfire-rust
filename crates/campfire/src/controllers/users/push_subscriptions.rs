@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use campfire_db::{CachedStatements, Connection, PushSubscription};
 use campfire_kit::{Ctx, Error, ParamMap, Result, StatusCode, format, permit_keys};
 use campfire_views::users;
+use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
 
 use crate::app::AppCtx;
@@ -114,10 +115,7 @@ fn find_by(conn: &Connection, user_id: i64, params: &ParamMap) -> campfire_db::R
         }
     }
     sql.push_str(" LIMIT 1");
-    let id: Option<i64> = conn
-        .query_row_cached(&sql, rusqlite::params_from_iter(values), |row| row.get(0))
-        .map(Some)
-        .or_else(|error| if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) })?;
+    let id: Option<i64> = conn.query_row_cached(&sql, rusqlite::params_from_iter(values), |row| row.get(0)).optional()?;
     id.map(|id| PushSubscription::find(conn, id)).transpose()
 }
 

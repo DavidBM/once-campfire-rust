@@ -10,11 +10,11 @@
 
 use std::sync::{Arc, LazyLock};
 
-use campfire_db::CachedStatements;
+use campfire_db::{CachedStatements, query_all};
 use campfire_kit::{Ctx, Error, ExpiresIn, Freshness, Response, Result, SendOptions, StatusCode, halt, http::header};
 use campfire_storage::file_server::{self, BodyPart};
 use campfire_storage::{Blob, Filename, Json, Staged, Storage, Variation, content_types, disk, paths};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use tokio::sync::Semaphore;
 
 use crate::app::{App, AppCtx};
@@ -576,7 +576,8 @@ pub async fn purge(app: &App, blob_id: i64) -> anyhow::Result<()> {
             }
             let mut dependents = Vec::new();
             // before_destroy { variant_records.destroy_all }: each record's image attachment goes too.
-            let variant_records: Vec<i64> = query_ids(conn, "SELECT id FROM active_storage_variant_records WHERE blob_id = ?1", blob_id)?;
+            let variant_records: Vec<i64> =
+                query_all(conn, "SELECT id FROM active_storage_variant_records WHERE blob_id = ?1", [blob_id], |row| row.get(0))?;
             for record_id in variant_records {
                 dependents.extend(destroy_attachment(conn, "ActiveStorage::VariantRecord", record_id, "image")?);
                 conn.execute_cached("DELETE FROM active_storage_variant_records WHERE id = ?1", [record_id])?;
@@ -610,17 +611,10 @@ fn destroy_attachment(conn: &rusqlite::Connection, record_type: &str, record_id:
             params![record_type, record_id, name],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map(Some)
-        .or_else(|error| if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) })?;
+        .optional()?;
     let Some((id, blob_id)) = attachment else { return Ok(None) };
     conn.execute_cached("DELETE FROM active_storage_attachments WHERE id = ?1", [id])?;
     Ok(Some(blob_id))
-}
-
-fn query_ids(conn: &rusqlite::Connection, sql: &str, id: i64) -> campfire_db::Result<Vec<i64>> {
-    let mut statement = conn.prepare_cached(sql)?;
-    let ids = statement.query_map([id], |row| row.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
-    Ok(ids)
 }
 
 /// A storage error inside a database closure. SQLite's own errors stay `Error::Sqlite`, so that
