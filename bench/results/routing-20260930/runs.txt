@@ -1,0 +1,85 @@
+# times_recognition (crates/campfire/src/controllers.rs), release build, the three binaries run
+# interleaved: base = d93d3dd plus the harness, is-match = 3124ea8, set = 6801941. Each line is the
+# median of 9 samples of 200,000 calls; "load" is /proc/loadavg when the run started (other agents'
+# cargo builds were running on the host).
+== base rep 1
+load: 11.57 9.89 7.53 at 07:14:53
+room_show       median   1017 ns  (min 1013, max 1023)
+messages_page   median   1382 ns  (min 1380, max 1390)
+search          median   1406 ns  (min 1398, max 1536)
+up              median   1227 ns  (min 1223, max 1264)
+representation  median   6550 ns  (min 6523, max 6639)
+long filename   median  33156 ns  (min 33055, max 33321)
+404             median   2043 ns  (min 2028, max 2053)
+== is-match rep 1
+load: 9.63 9.71 7.68 at 07:16:17
+room_show       median    425 ns  (min 420, max 428)
+messages_page   median    824 ns  (min 818, max 826)
+search          median    510 ns  (min 509, max 514)
+up              median    332 ns  (min 331, max 333)
+representation  median   4878 ns  (min 4860, max 4921)
+long filename   median  34557 ns  (min 34262, max 36570)
+404             median    704 ns  (min 703, max 706)
+== set rep 1
+load: 4.12 8.05 7.26 at 07:17:34
+room_show       median    244 ns  (min 243, max 265)
+messages_page   median    266 ns  (min 266, max 270)
+search          median    210 ns  (min 209, max 211)
+up              median    193 ns  (min 192, max 193)
+representation  median   2800 ns  (min 2795, max 2812)
+long filename   median  32458 ns  (min 32384, max 32741)
+404             median     47 ns  (min 47, max 49)
+== base rep 2
+load: 2.35 6.75 6.86 at 07:18:40
+room_show       median   1077 ns  (min 1065, max 1090)
+messages_page   median   1459 ns  (min 1382, max 1470)
+search          median   1393 ns  (min 1390, max 1410)
+up              median   1227 ns  (min 1222, max 1248)
+representation  median   6435 ns  (min 6405, max 6450)
+long filename   median  33010 ns  (min 32767, max 33366)
+404             median   2026 ns  (min 2006, max 2053)
+== is-match rep 2
+load: 3.32 5.85 6.53 at 07:20:03
+room_show       median    442 ns  (min 438, max 448)
+messages_page   median    877 ns  (min 867, max 891)
+search          median    531 ns  (min 529, max 542)
+up              median    366 ns  (min 360, max 375)
+representation  median   5075 ns  (min 5015, max 5250)
+long filename   median  35198 ns  (min 34970, max 38694)
+404             median    710 ns  (min 705, max 721)
+== set rep 2
+load: 5.68 6.17 6.59 at 07:21:22
+room_show       median    246 ns  (min 244, max 251)
+messages_page   median    271 ns  (min 267, max 281)
+search          median    217 ns  (min 215, max 220)
+up              median    196 ns  (min 195, max 206)
+representation  median   2835 ns  (min 2825, max 2847)
+long filename   median  32565 ns  (min 32486, max 32709)
+404             median     47 ns  (min 47, max 47)
+== base rep 3
+load: 5.16 6.02 6.52 at 07:22:28
+room_show       median   1049 ns  (min 1015, max 1154)
+messages_page   median   1374 ns  (min 1367, max 1387)
+search          median   1393 ns  (min 1385, max 1399)
+up              median   1213 ns  (min 1212, max 1224)
+representation  median   6385 ns  (min 6378, max 6430)
+long filename   median  33339 ns  (min 33035, max 34043)
+404             median   2169 ns  (min 2137, max 2214)
+== is-match rep 3
+load: 9.31 6.75 6.71 at 07:23:52
+room_show       median    424 ns  (min 422, max 431)
+messages_page   median    839 ns  (min 832, max 844)
+search          median    514 ns  (min 509, max 527)
+up              median    345 ns  (min 339, max 350)
+representation  median   5064 ns  (min 4965, max 5196)
+long filename   median  34570 ns  (min 34481, max 36488)
+404             median    708 ns  (min 707, max 718)
+== set rep 3
+load: 6.48 6.68 6.70 at 07:25:10
+room_show       median    263 ns  (min 256, max 264)
+messages_page   median    286 ns  (min 285, max 289)
+search          median    211 ns  (min 210, max 229)
+up              median    194 ns  (min 193, max 196)
+representation  median   2801 ns  (min 2797, max 2817)
+long filename   median  32626 ns  (min 32568, max 32877)
+404             median     47 ns  (min 47, max 47)
