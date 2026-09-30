@@ -37,8 +37,13 @@ the map 562 vs 546 ns): within this host's noise.
 
 ## Over HTTP
 
-To be added by the coordinator. Through the front server, assets up to `MAX_CACHE_ITEM_SIZE` (1 MB)
-come from its response cache after the first request, so only the source map reaches
-`static_response` there; lexxy.js and _reset.css have to be requested from the bare app port. With
-gzip, the per-request deflate of a large asset (about 9 ms for lexxy.js) hides the copy, so the
-comparison is with `--gzip 0`.
+To be added by the coordinator. Through the front server, responses up to `MAX_CACHE_ITEM_SIZE`
+(1 MB) come from its response cache after the first request. The limit applies to the body it
+records, so every asset's gzipped response is cached, the map's included (it gzips to 426 KB), and
+only identity requests for the source map reach `static_response` there. lexxy.js and _reset.css
+have to be requested from the bare app port, where gzip's per-request deflate of a large asset
+(about 9 ms for lexxy.js) hides the copy, so the comparison is with `--gzip 0`.
+
+In production, with the front on, the saving applies to front-cache misses, range requests (which
+bypass the cache), identity requests for files over 1 MB and the bare app, not to every asset
+request.
