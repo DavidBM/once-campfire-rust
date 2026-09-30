@@ -140,7 +140,9 @@ fn valid_mime_type(string: &str) -> bool {
 struct AcceptItem {
     index: usize,
     name: String,
-    q: i64,
+    /// `(q.to_f * 100).to_i`, kept in a float so that q-values past `i64` still order as Ruby's
+    /// Integers do. An infinite one, where Rails raises FloatDomainError, sorts first (or last).
+    q: f64,
 }
 
 /// `Mime::Type.parse(accept_header)`, keeping only registered types and `*/*` (the
@@ -182,11 +184,12 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
                 None if name == "*/*" => 0.0,
                 None => 1.0,
             };
-            list.push(AcceptItem { index, name, q: (q * 100.0) as i64 });
+            list.push(AcceptItem { index, name, q: (q * 100.0).trunc() });
             index += 1;
         }
     }
-    list.sort_by(|a, b| b.q.cmp(&a.q).then(a.index.cmp(&b.index)));
+    // -0.0 ties with 0.0, as both are Ruby's 0 (`ruby_to_f` never gives NaN).
+    list.sort_by(|a, b| b.q.partial_cmp(&a.q).unwrap_or(std::cmp::Ordering::Equal).then(a.index.cmp(&b.index)));
     sort_xml(&mut list);
 
     for item in &list {
@@ -484,10 +487,17 @@ mod tests {
             ("text/html;q=abc, application/json;q=0.1", ["json", "html"]),
             ("text/html;q=+0.3, application/json;q=0.2", ["html", "json"]),
             ("text/html;q= 0.3, application/json;q=0.2", ["html", "json"]),
+            ("text/html;q=1e17, application/json;q=1e18", ["json", "html"]),
+            ("text/html;q=1e19, application/json;q=1e20", ["json", "html"]),
+            ("text/html;q=-0.001, application/json;q=0", ["html", "json"]),
+            ("application/json;q=0, text/html;q=-0.001", ["json", "html"]),
         ] {
             assert_eq!(symbols(&parse_accept(accept).unwrap()), order, "{accept}");
         }
         assert_eq!(symbols(&parse_accept("*/*;q=, application/json;q=0.5").unwrap()), ["json", "*/*"]);
+        // Rails raises FloatDomainError (a 500) on an infinite q-value.
+        assert_eq!(symbols(&parse_accept("text/html;q=1e400, application/json").unwrap()), ["html", "json"]);
+        assert_eq!(symbols(&parse_accept("text/html;q=-1e400, application/json").unwrap()), ["json", "html"]);
     }
 
     #[test]

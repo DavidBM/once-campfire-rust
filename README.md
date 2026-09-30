@@ -434,6 +434,8 @@ Deliberate:
   are, so `NOT`, `AND`, `OR` or `NEAR` in the wrong place is a 500. Each word is now matched as
   itself.
 - **`/rooms/directs/:id` redirects to the room** instead of answering 500.
+- **An infinite q-value in `Accept` is read.** Rails answers `text/html;q=1e400, application/json`
+  with a 500 (a FloatDomainError); the type with it now sorts first, or last when it's negative.
 - **Edge's install instructions render.** With an EdgeHTML user agent (`Edge/`), Rails answers
   profile and room pages with a 500 because the partial names an image that isn't there
   (`install-edge.svg`); the Rust app ships it.
