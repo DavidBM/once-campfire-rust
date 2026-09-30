@@ -12,16 +12,21 @@
 //! messages share and make a room page ~4× larger; chained like this it's within 1% of compressing
 //! the page whole.
 //!
-//! Fragments are known by identity (the `Arc` the fragment cache hands out), text by its SHA-256.
+//! Fragments are known by identity (the `Arc` the fragment cache hands out), text by its SHA-256,
+//! which is remembered by the text's bytes so that a page's layout isn't hashed on every request.
 //! A stored piece that depends on a fragment holds a `Weak` to it, so while the piece exists that
 //! address can't come back as a different fragment.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::hash::{BuildHasher, Hash};
 use std::ops::Range;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
 
 use bytes::Bytes;
 use flate2::{Compress, Compression, FlushCompress};
+use foldhash::fast::RandomState;
 use sha2::{Digest, Sha256};
 
 /// Smaller fragments aren't worth a part of their own; they stay in the text around them.
@@ -42,8 +47,15 @@ const MAX_TEXT_PIECE_BYTES: usize = 16 << 20;
 /// Larger pieces aren't stored: one would take a good part of a generation, and rotating
 /// generations to fit it would push out the pieces pages keep using.
 const MAX_STORED_TEXT_PIECE: usize = MAX_TEXT_PIECE_BYTES / 64;
-/// What each stored piece costs beyond its bytes: the map entry, its key and the `Bytes`.
-const TEXT_PIECE_OVERHEAD: usize = 128;
+/// A bound on the bytes of texts remembered with their SHA-256. A room page's texts (the layout
+/// before and after its messages) are ~34 KB for each person and room, so a generation holds those
+/// of ~240 rooms as people see them: every page in use at a small install. A text that isn't
+/// remembered is simply hashed again.
+const MAX_TEXT_BYTES: usize = 16 << 20;
+/// Larger texts are hashed every time, for the same reason larger pieces aren't stored.
+const MAX_STORED_TEXT: usize = MAX_TEXT_BYTES / 64;
+/// What each stored entry costs beyond its bytes: the map's slot, its key and the allocation.
+const ENTRY_OVERHEAD: usize = 128;
 
 type Sha = [u8; 32];
 
@@ -192,7 +204,7 @@ impl PageParts {
                 .iter()
                 .zip(&befores)
                 .map(|(part, (before, _))| match part {
-                    Part::Text { sha, .. } => texts.get(&(*sha, *before)),
+                    Part::Text { sha, .. } => texts.get(&(*sha, *before), |piece| piece.deflated.clone()),
                     Part::Fragment { fragment, glue, range, .. } => {
                         let glue = &body[range.start..range.start + glue];
                         fragments.get(&fragment_key(fragment)).and_then(|known| known.piece_after(*before, glue))
@@ -214,6 +226,7 @@ impl PageParts {
                 _ => None,
             };
             match part {
+                Part::Text { .. } if deflated.len() > MAX_STORED_TEXT_PIECE => {}
                 Part::Text { sha, .. } => new_texts.push(((*sha, *before), TextPiece { deflated: deflated.clone(), _pin: pin })),
                 Part::Fragment { fragment, glue, range, .. } => new_fragments.push((
                     fragment.clone(),
@@ -246,8 +259,23 @@ impl PageParts {
 }
 
 fn text_part(body: &[u8], range: Range<usize>) -> Part {
-    let sha = Sha256::digest(&body[range.clone()]).into();
+    let sha = text_sha(&TEXT_SHAS, &body[range.clone()]);
     Part::Text { range, sha }
+}
+
+/// The SHA-256 of `text`, remembered by its bytes: a page repeats its texts (a room's layout) from
+/// one request to the next, and finding one again costs a fast hash and a compare, a small part of
+/// hashing it. The compare is what makes this sound, since the SHA-256 is what stored pieces are
+/// found by: two texts whose fast hashes collide still get their own.
+fn text_sha<S: BuildHasher + Default>(shas: &Mutex<Generations<Box<[u8]>, Sha, S>>, text: &[u8]) -> Sha {
+    if let Some(sha) = lock(shas).get(text, |sha| *sha) {
+        return sha;
+    }
+    let sha = Sha256::digest(text).into();
+    if text.len() <= MAX_STORED_TEXT {
+        lock(shas).insert(text.into(), sha);
+    }
+    sha
 }
 
 /// Where each fragment is, searching after the previous one; fragments not found are skipped.
@@ -356,44 +384,64 @@ struct TextPiece {
     _pin: Option<Weak<String>>,
 }
 
-/// Text pieces in two generations: a read promotes an old piece, and when the young generation
-/// fills half the budget it becomes the old one (dropping the previous old one). Bounded, and what
-/// pages keep using stays.
-#[derive(Default)]
-struct TextPieces {
-    young: HashMap<(Sha, Before), TextPiece>,
-    old: HashMap<(Sha, Before), TextPiece>,
-    young_bytes: usize,
+/// A map in two generations, bounded by what its entries cost: reading an old entry promotes it,
+/// and when the young generation costs more than half the budget it becomes the old one (dropping
+/// the previous old one). Bounded, and what pages keep using stays. Hashed with foldhash: text keys
+/// are tens of KB, and SipHash would take a third as long as the SHA-256 finding them saves.
+struct Generations<K, V, S = RandomState> {
+    young: HashMap<K, V, S>,
+    old: HashMap<K, V, S>,
+    young_cost: usize,
+    budget: usize,
+    cost: fn(&K, &V) -> usize,
 }
 
-impl TextPieces {
-    fn get(&mut self, key: &(Sha, Before)) -> Option<Bytes> {
-        if let Some(piece) = self.young.get(key) {
-            return Some(piece.deflated.clone());
-        }
-        let piece = self.old.remove(key)?;
-        let deflated = piece.deflated.clone();
-        self.insert(*key, piece);
-        Some(deflated)
+impl<K: Hash + Eq, V, S: BuildHasher + Default> Generations<K, V, S> {
+    fn with_budget(budget: usize, cost: fn(&K, &V) -> usize) -> Self {
+        Self { young: HashMap::default(), old: HashMap::default(), young_cost: 0, budget, cost }
     }
 
-    fn insert(&mut self, key: (Sha, Before), piece: TextPiece) {
-        if piece.deflated.len() > MAX_STORED_TEXT_PIECE {
-            return;
+    /// What `read` makes of the entry for `key`, promoting it if it's old.
+    fn get<Q, R>(&mut self, key: &Q, read: impl FnOnce(&V) -> R) -> Option<R>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        if let Some(value) = self.young.get(key) {
+            return Some(read(value));
         }
-        self.young_bytes += piece.deflated.len() + TEXT_PIECE_OVERHEAD;
-        self.young.insert(key, piece);
-        if self.young_bytes > MAX_TEXT_PIECE_BYTES / 2 {
+        let (key, value) = self.old.remove_entry(key)?;
+        let found = read(&value);
+        self.insert(key, value);
+        Some(found)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        self.young_cost += (self.cost)(&key, &value);
+        match self.young.entry(key) {
+            // Another request stored the same meanwhile.
+            Entry::Occupied(mut entry) => {
+                self.young_cost -= (self.cost)(entry.key(), entry.get());
+                entry.insert(value);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+        }
+        if self.young_cost > self.budget / 2 {
             self.old = std::mem::take(&mut self.young);
-            self.young_bytes = 0;
+            self.young_cost = 0;
         }
     }
 }
 
 static FRAGMENTS: LazyLock<Mutex<HashMap<usize, KnownFragment>>> = LazyLock::new(Mutex::default);
-static TEXT_PIECES: LazyLock<Mutex<TextPieces>> = LazyLock::new(Mutex::default);
+static TEXT_PIECES: LazyLock<Mutex<Generations<(Sha, Before), TextPiece>>> =
+    LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_PIECE_BYTES, |_, piece| piece.deflated.len() + ENTRY_OVERHEAD)));
+static TEXT_SHAS: LazyLock<Mutex<Generations<Box<[u8]>, Sha>>> =
+    LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_BYTES, |text, _| text.len() + ENTRY_OVERHEAD)));
 
-fn lock<T>(mutex: &'static Mutex<T>) -> MutexGuard<'static, T> {
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -462,7 +510,7 @@ mod tests {
         let gz = parts.gzip(body.as_bytes(), 0);
         assert_eq!(gunzip(&gz), body.as_bytes());
         let sha: Sha = Sha256::digest(body.as_bytes()).into();
-        assert!(lock(&TEXT_PIECES).get(&(sha, Before::Nothing)).is_some(), "stored under the body's SHA-256");
+        assert!(lock(&TEXT_PIECES).get(&(sha, Before::Nothing), |_| ()).is_some(), "stored under the body's SHA-256");
         assert_eq!(PageParts::whole(body.as_bytes()).unwrap().gzip(body.as_bytes(), 0), gz);
         assert!(PageParts::whole(b"<p>small</p>").is_none());
     }
@@ -593,26 +641,80 @@ mod tests {
     }
 
     #[test]
-    fn text_pieces_stay_within_their_budget() {
-        let mut texts = TextPieces::default();
-        let size = MAX_STORED_TEXT_PIECE;
-        let piece = || TextPiece { deflated: Bytes::from(vec![0; size]), _pin: None };
+    fn generations_stay_within_their_budget_and_keep_what_is_read() {
+        let budget = 64 * 1024;
+        let size = 1024;
+        let mut map: Generations<u8, usize> = Generations::with_budget(budget, |_, size| *size);
         for n in 0..=255u8 {
-            texts.insert(([n; 32], Before::Nothing), piece());
-            let held = (texts.young.len() + texts.old.len()) * size;
-            // Each generation may overshoot half the budget by the piece that filled it.
-            assert!(held <= MAX_TEXT_PIECE_BYTES + 2 * size, "{held} bytes held");
+            map.insert(n, size);
+            assert!(map.get(&0, |_| ()).is_some(), "what's read stays");
+            let held = (map.young.len() + map.old.len()) * size;
+            // Each generation may overshoot half the budget by the entry that filled it.
+            assert!(held <= budget + 2 * size, "{held} bytes held");
         }
-        assert!(texts.get(&([255; 32], Before::Nothing)).is_some(), "the latest is kept");
+        assert!(map.get(&255, |_| ()).is_some(), "the latest is kept");
+        assert!(map.get(&1, |_| ()).is_none(), "what isn't read ages out");
+
+        let mut map: Generations<u8, usize> = Generations::with_budget(budget, |_, size| *size);
+        map.insert(1, size);
+        map.insert(1, size);
+        assert_eq!(map.young_cost, size, "an entry stored twice counts once");
     }
 
     #[test]
-    fn oversized_pieces_are_served_but_not_stored() {
-        let mut texts = TextPieces::default();
-        texts.insert(([1; 32], Before::Nothing), TextPiece { deflated: Bytes::from(vec![0; 1024]), _pin: None });
-        texts.insert(([2; 32], Before::Nothing), TextPiece { deflated: Bytes::from(vec![0; MAX_STORED_TEXT_PIECE + 1]), _pin: None });
-        assert!(texts.get(&([2; 32], Before::Nothing)).is_none());
-        assert!(texts.get(&([1; 32], Before::Nothing)).is_some(), "an oversized piece pushes nothing out");
+    fn a_large_one_off_body_is_served_but_not_remembered() {
+        // Incompressible, so its piece is as large as the text: over both stores' bounds.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let body: Vec<u8> = (0..MAX_STORED_TEXT.max(MAX_STORED_TEXT_PIECE) + 1)
+            .map(|_| {
+                state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+                (state >> 56) as u8
+            })
+            .collect();
+        assert_eq!(gunzip(&PageParts::whole(&body).unwrap().gzip(&body, 0)), body);
+        let sha: Sha = Sha256::digest(&body).into();
+        assert!(lock(&TEXT_SHAS).get(&body[..], |_| ()).is_none(), "hashed, not remembered");
+        assert!(lock(&TEXT_PIECES).get(&(sha, Before::Nothing), |_| ()).is_none(), "compressed, not stored");
+    }
+
+    #[test]
+    fn a_text_part_is_its_texts_sha256_the_first_time_and_after() {
+        let body = page("<html><head>layout</head><body>", &(700..703).map(message).collect::<Vec<_>>(), "</body></html>");
+        for range in [0..10, 5..body.len(), 0..body.len()] {
+            let text: Sha = Sha256::digest(&body.as_bytes()[range.clone()]).into();
+            for _ in 0..2 {
+                let Part::Text { sha, .. } = text_part(body.as_bytes(), range.clone()) else { unreachable!() };
+                assert_eq!(sha, text);
+            }
+        }
+    }
+
+    /// Hashes every key alike, as texts whose fast hashes collide.
+    #[derive(Default)]
+    struct Colliding;
+
+    impl std::hash::Hasher for Colliding {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, _: &[u8]) {}
+    }
+
+    #[test]
+    fn a_text_is_known_by_its_bytes_not_its_fast_hash() {
+        // A small budget, so texts also age out and come back through the old generation.
+        let shas: Mutex<Generations<Box<[u8]>, Sha, std::hash::BuildHasherDefault<Colliding>>> =
+            Mutex::new(Generations::with_budget(8 * 1024, |text, _| text.len() + ENTRY_OVERHEAD));
+        // The same length, all in one bucket.
+        let texts: Vec<String> = (0..30).map(|n| format!("<h1>Room {n:02}</h1>").repeat(40)).collect();
+        for _ in 0..3 {
+            for text in &texts {
+                let sha: Sha = Sha256::digest(text).into();
+                assert_eq!(text_sha(&shas, text.as_bytes()), sha);
+                assert_eq!(lock(&shas).get(text.as_bytes(), |sha| *sha), Some(sha), "remembered as its own");
+            }
+        }
     }
 
     #[test]

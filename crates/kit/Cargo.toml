@@ -33,6 +33,7 @@ hyper = { workspace = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["server", "server-auto", "http1", "http2", "tokio"] }
 flate2.workspace = true
 crc32fast.workspace = true
+foldhash.workspace = true
 memchr.workspace = true
 indexmap.workspace = true
 bytes.workspace = true

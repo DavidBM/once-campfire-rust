@@ -72,6 +72,8 @@ libc         = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio-tungstenite = "0.29"
 crc32fast    = "1"
+# kit's page parts hash texts of tens of KB by their bytes; already built for hashbrown
+foldhash     = "0.2"
 memchr       = "2"
 indexmap     = "2"
 tempfile     = "3"
