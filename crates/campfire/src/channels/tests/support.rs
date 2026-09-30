@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use campfire_cable::Config;
 use campfire_db::fixtures::{self, identify};
-use campfire_db::testing::BasicRichText;
 use campfire_db::{Boost, Database, Event, EventSink, Membership, Message, Room, Session, Timestamp};
 use campfire_kit::{Clock, TestClock};
 use futures_util::{SinkExt, StreamExt};
@@ -18,6 +17,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::channels::{self, Broadcasts, Cable, Deps, Partials, revocation};
+use crate::rich_text::AppRichText;
 
 pub const SECRET_KEY_BASE: &str = "channels-test-secret-key-base";
 
@@ -50,7 +50,9 @@ pub async fn start() -> TestApp {
     let dir = tempfile::tempdir().unwrap();
     let sink = Arc::new(CableSink::default());
     let clock = Arc::new(TestClock::new());
-    let env = campfire_db::Env { clock: clock.clone(), sink: sink.clone(), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
+    let secrets = Arc::new(Secrets::new(SECRET_KEY_BASE));
+    let rich_text = Arc::new(AppRichText::new(secrets.clone(), clock.clone()));
+    let env = campfire_db::Env { clock: clock.clone(), sink: sink.clone(), rich_text, bcrypt_cost: 4 };
     let mut config = campfire_db::Config::new(dir.path().join("test.sqlite3"));
     config.readers = 2;
     config.environment = "test".into();
@@ -62,7 +64,6 @@ pub async fn start() -> TestApp {
     .await
     .unwrap();
 
-    let secrets = Arc::new(Secrets::new(SECRET_KEY_BASE));
     let deps = Deps { db: db.clone(), secrets: secrets.clone(), clock: clock.clone() };
     let server = channels::server(deps, Config { assume_ssl: false, ..Config::default() });
     let _ = sink.server.set(server.clone());
