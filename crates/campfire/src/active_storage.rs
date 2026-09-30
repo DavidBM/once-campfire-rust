@@ -473,6 +473,8 @@ pub async fn direct_uploads_create(c: &mut Ctx) -> Result {
     let (Some(filename), Some(checksum)) = (text("filename").filter(|f| !f.is_empty()), text("checksum").filter(|c| !c.is_empty())) else {
         return Err(Error::Status(StatusCode::UNPROCESSABLE_ENTITY));
     };
+    // Stricter than Rails, whose attribute cast makes a byte size that isn't a number 0 (an
+    // upload only an empty file could fill): it's refused.
     let Some(byte_size) = text("byte_size").and_then(|s| crate::concerns::cast_integer(&s)) else {
         return Err(Error::Status(StatusCode::UNPROCESSABLE_ENTITY));
     };

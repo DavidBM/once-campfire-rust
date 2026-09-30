@@ -98,3 +98,21 @@ pub fn sanitize_attributes(content: Content) -> Result<Content, Error> {
     let html = sanitizer::sanitize(&content.to_html(), &SafeList::content_filter()).map_err(Error::Parse)?;
     Content::wrap(&html)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_tweet_urls_like_rails() {
+        // `RemoveSoloUnfurledLinkText#normalize_tweet_url` in the reference.
+        for (url, normalized) in [
+            ("HTTPS://x.com/dhh/status/1?s=20", "https://twitter.com/dhh/status/1"),
+            ("https://x.com/dhh/status/1?s=20", "https://twitter.com/dhh/status/1"),
+            ("HTTP://twitter.com/a", "http://twitter.com/a"),
+            ("Https://X.com/dhh/status/1", "Https://X.com/dhh/status/1"),
+        ] {
+            assert_eq!(normalize_tweet_url(Some(url)).unwrap().as_deref(), Some(normalized), "{url}");
+        }
+    }
+}

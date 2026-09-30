@@ -514,10 +514,11 @@ impl Ctx {
         self.cache_control = CacheControl { no_store: true, ..CacheControl::default() };
     }
 
-    /// Set a response header ahead of the response (`response.headers[...] = ...`).
+    /// Set a response header ahead of the response (`response.headers[...] = ...`), as Puma would
+    /// write the value (see `Response::header`).
     pub fn set_header(&mut self, name: impl TryInto<HeaderName>, value: &str) {
         let name = name.try_into().unwrap_or_else(|_| panic!("invalid header name"));
-        self.headers.insert(name, HeaderValue::from_str(value).expect("invalid header value"));
+        crate::response::set_header_value(&mut self.headers, name, value);
     }
 
     /// A controller that includes `ActionController::Live` (`ActiveStorage::Streaming` does):

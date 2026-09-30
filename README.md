@@ -380,7 +380,8 @@ Deliberate:
   a message are now stored without duration or bit rate, which Campfire never shows.
 - **Limits where Rails had none, or raised.** Request bodies other than file uploads are capped at
   16 MiB (a 413), and so are Active Storage direct uploads, which Campfire's editor doesn't use:
-  asking for a larger one is a 413. A QR code for more than a QR code can hold is a 422, not a 500.
+  asking for a larger one is a 413, and for one whose byte size isn't a number a 422 (Rails made
+  it 0). A QR code for more than a QR code can hold is a 422, not a 500.
   Page numbers are capped at a billion. A WebSocket connection holds up to 64 subscriptions with identifiers of up to
   4 KiB, and a client that doesn't read what it's sent for 30 seconds is disconnected. Deactivating
   or banning a user closes their open connections once the change commits.
@@ -409,6 +410,10 @@ Deliberate:
   image's settings (60 and 300 seconds) idle connections close after 60 seconds either way; without
   them the defaults are 60 and 30, so an idle HTTP/1 connection closes after 30 seconds. HTTP/2
   connections get the idle timeout.
+- **A response header line holding a DEL is left out.** Header values that come from the request,
+  like `?disposition=` on a proxied blob, go out as Puma writes them: line by line, leaving out the
+  lines that hold control characters. Puma writes a DEL, and Thruster turns the response into a
+  502; the app leaves that line out like the others.
 - **Media is processed off the database writer.** Rails saves a blob's row and then uploads its
   file after commit; here the upload is copied into storage first, straight from the request's
   tempfile, and deleted again if the save fails. Variants, video posters and analysis run on
@@ -418,6 +423,10 @@ Deliberate:
   the same missing variant may both transform it: the first to save wins and the other's file is
   deleted. ffmpeg is stopped after 60 seconds of drawing a poster and ffprobe after 30 seconds of
   reading a file, which Rails doesn't limit.
+- **Floats in blob metadata have the shortest digits.** Rails writes them with the json gem's
+  Grisu2, which now and then picks a longer form of the same number (`250.70174600000001` for
+  `250.701746`); the app writes the shortest one, laid out the same way. Both read back as the
+  same number.
 - **Passwords are hashed and checked outside the database.** bcrypt (about 250 ms) runs before the
   write that saves a password, and a sign-in looks the user up and then verifies the password after
   releasing the database connection. An unknown email address still costs one bcrypt, as in Rails.
@@ -425,6 +434,8 @@ Deliberate:
   are, so `NOT`, `AND`, `OR` or `NEAR` in the wrong place is a 500. Each word is now matched as
   itself.
 - **`/rooms/directs/:id` redirects to the room** instead of answering 500.
+- **An infinite q-value in `Accept` is read.** Rails answers `text/html;q=1e400, application/json`
+  with a 500 (a FloatDomainError); the type with it now sorts first, or last when it's negative.
 - **Edge's install instructions render.** With an EdgeHTML user agent (`Edge/`), Rails answers
   profile and room pages with a 500 because the partial names an image that isn't there
   (`install-edge.svg`); the Rust app ships it.

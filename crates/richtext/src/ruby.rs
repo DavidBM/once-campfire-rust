@@ -223,7 +223,9 @@ fn string_inspect(s: &str) -> String {
     out
 }
 
-/// `Float#to_s`.
+/// `Float#to_s`: plain decimals from 1e-4 up to (not including) 1e15, and above that while the
+/// shortest digits still reach past the decimal point (`1000000000000000.1`); the exponent form
+/// otherwise (`flo_to_s` in Ruby 3.4's numeric.c).
 pub fn ruby_float_to_s(f: f64) -> String {
     if f.is_nan() {
         return "NaN".into();
@@ -234,13 +236,9 @@ pub fn ruby_float_to_s(f: f64) -> String {
     if f == 0.0 {
         return if f.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
     }
-    let sci = format!("{:e}", f.abs());
-    let (mantissa, exp) = sci.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
-    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
-    let decpt = exp + 1;
+    let (digits, decpt) = shortest_digits(f.abs());
     let sign = if f < 0.0 { "-" } else { "" };
-    if !(-3..=16).contains(&decpt) {
+    if decpt < -3 || (decpt > 15 && digits.len() as i32 <= decpt) {
         let (first, rest) = digits.split_at(1);
         let rest = if rest.is_empty() { "0" } else { rest };
         let e = decpt - 1;
@@ -255,9 +253,89 @@ pub fn ruby_float_to_s(f: f64) -> String {
     }
 }
 
+/// The shortest digits that read back as `magnitude`, and where the decimal point goes in them.
+/// When two such forms are equally close, Ruby's dtoa takes the even one and Rust the upper one:
+/// `667020902720176.25.to_s` is "667020902720176.2". Those ties take 16 or 17 digits, and Rust's
+/// fixed-precision formatting breaks them to even.
+fn shortest_digits(magnitude: f64) -> (String, i32) {
+    let shortest = scientific_digits(&format!("{magnitude:e}"));
+    let (digits, _) = &shortest;
+    if digits.len() >= 16 && digits.ends_with(['1', '3', '5', '7', '9']) {
+        let even = format!("{:.*e}", digits.len() - 1, magnitude);
+        if even.parse::<f64>() == Ok(magnitude) {
+            return scientific_digits(&even);
+        }
+    }
+    shortest
+}
+
+/// The digits of `1.2345e6` and where the decimal point goes in them (7).
+fn scientific_digits(formatted: &str) -> (String, i32) {
+    let (mantissa, exponent) = formatted.split_once('e').unwrap();
+    let digits = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    (digits, exponent.parse::<i32>().unwrap() + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn float_to_s_like_ruby_3_4() {
+        // `Float#to_s` in the reference (Ruby 3.4.10): from 1e15, the exponent form unless there
+        // are digits after the decimal point.
+        for (f, s) in [
+            (100.0, "100.0"),
+            (0.1, "0.1"),
+            (0.0001, "0.0001"),
+            (0.00012345, "0.00012345"),
+            (1e-5, "1.0e-05"),
+            (1.5e-7, "1.5e-07"),
+            (5e-324, "5.0e-324"),
+            (1e14, "100000000000000.0"),
+            (123456789012345.6, "123456789012345.6"),
+            (999999999999999.0, "999999999999999.0"),
+            (999999999999999.9, "999999999999999.9"),
+            (-999999999999999.0, "-999999999999999.0"),
+            (1e15, "1.0e+15"),
+            (-1e15, "-1.0e+15"),
+            (1.5e15, "1.5e+15"),
+            (1234567890123456.0, "1.234567890123456e+15"),
+            (9007199254740992.0, "9.007199254740992e+15"),
+            (1000000000000001.0, "1.000000000000001e+15"),
+            (1963684456584958.8, "1963684456584958.8"),
+            (1000000000000000.1, "1000000000000000.1"),
+            (2251799813685248.5, "2251799813685248.5"),
+            (-2551800308696183.5, "-2551800308696183.5"),
+            (1e16, "1.0e+16"),
+            (1e20, "1.0e+20"),
+            (f64::MAX, "1.7976931348623157e+308"),
+        ] {
+            assert_eq!(ruby_float_to_s(f), s, "{f:e}");
+        }
+    }
+
+    #[test]
+    fn float_to_s_breaks_ties_to_even_like_ruby() {
+        // `Float#to_s` in the reference: of two shortest forms equally close, the even one, as long
+        // as it reads back. Doubles are twice as dense just below 2^-24, so its even form
+        // (5.960464477539062e-08) reads back as a different double.
+        for (f, s) in [
+            (667020902720176.0 + 0.25, "667020902720176.2"),
+            (667020902720176.0 + 0.75, "667020902720176.8"),
+            (1000000000000000.2, "1000000000000000.2"),
+            (1125899906842624.0 + 0.25, "1125899906842624.2"),
+            (-(2074704973491874.0 + 0.25), "-2074704973491874.2"),
+            (24603114260468.0 + 0.0625, "24603114260468.062"),
+            (210745403561986.0 + 0.125, "210745403561986.12"),
+            (2f64.powi(-24), "5.960464477539063e-08"),
+            (2f64.powi(-25), "2.9802322387695312e-08"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1.0 / 3.0, "0.3333333333333333"),
+        ] {
+            assert_eq!(ruby_float_to_s(f), s, "{f:e}");
+        }
+    }
 
     #[test]
     fn matches_ruby() {

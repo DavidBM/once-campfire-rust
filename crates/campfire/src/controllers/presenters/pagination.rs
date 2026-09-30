@@ -100,7 +100,7 @@ fn with_page(url: &str, page: &str) -> String {
     let mut values: Vec<(String, Option<String>)> = Vec::new();
     for pair in query.unwrap_or("").split('&').filter(|pair| !pair.is_empty()) {
         let (key, value) = match pair.split_once('=') {
-            Some((key, value)) => (unencode(key), Some(unencode(value).replace('+', " "))),
+            Some((key, value)) => (unencode(key), Some(unencode(&value.replace('+', " ")))),
             None => (unencode(pair), None),
         };
         match values.iter_mut().find(|(existing, _)| *existing == key) {
@@ -128,8 +128,8 @@ fn with_page(url: &str, page: &str) -> String {
     result
 }
 
-/// `Addressable::URI.unencode_component` (`query_values` then turns "+" in values into spaces,
-/// after unencoding).
+/// `Addressable::URI.unencode_component`. `query_values` turns "+" in values (not keys) into
+/// spaces first, so an encoded `%2B` stays a "+".
 fn unencode(value: &str) -> String {
     percent_encoding::percent_decode_str(value).decode_utf8_lossy().into_owned()
 }
@@ -193,5 +193,19 @@ mod tests {
             with_page("http://x.test/autocompletable/users.json?query=a+b&page=1&room_id=3", "2"),
             "http://x.test/autocompletable/users.json?page=2&query=a%20b&room_id=3"
         );
+    }
+
+    #[test]
+    fn plus_is_a_space_only_before_unencoding() {
+        // Addressable's `query_values=` after `query_values` in the reference.
+        for (query, next) in [
+            ("query=a%2Bb", "page=2&query=a%2Bb"),
+            ("q=a%2B+b&page=1", "page=2&q=a%2B%20b"),
+            ("a+b=c+d", "a%2Bb=c%20d&page=2"),
+            ("k=%20+", "k=%20%20&page=2"),
+            ("k", "k&page=2"),
+        ] {
+            assert_eq!(with_page(&format!("http://x.test/p?{query}"), "2"), format!("http://x.test/p?{next}"), "{query}");
+        }
     }
 }

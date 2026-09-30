@@ -140,7 +140,9 @@ fn valid_mime_type(string: &str) -> bool {
 struct AcceptItem {
     index: usize,
     name: String,
-    q: i64,
+    /// `(q.to_f * 100).to_i`, kept in a float so that q-values past `i64` still order as Ruby's
+    /// Integers do. An infinite one, where Rails raises FloatDomainError, sorts first (or last).
+    q: f64,
 }
 
 /// `Mime::Type.parse(accept_header)`, keeping only registered types and `*/*` (the
@@ -149,7 +151,7 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
     let mut formats: Vec<Format> = Vec::new();
     if !header.contains(',') {
         let header = match find_q_separator(header) {
-            Some(index) => header[..index].trim(),
+            Some((index, _)) => header[..index].trim(),
             None => header,
         };
         if header.trim().is_empty() {
@@ -164,15 +166,10 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
     let mut list = Vec::new();
     let mut index = 0;
     for item in scan_accept_items(header) {
-        let (params, q) = match find_q_separator(item) {
-            Some(i) => {
-                let rest = &item[i..];
-                let q_start = rest.find('=').map(|e| e + 1).unwrap_or(rest.len());
-                let q = rest[q_start..].trim_start_matches('"');
-                (&item[..i], Some(q))
-            }
-            None => (item, None),
-        };
+        // `params, q = header.split(PARAMETER_SEPARATOR_REGEXP)`
+        let fields = ruby_split(item, find_q_separator);
+        let Some(params) = fields.first() else { continue };
+        let q = fields.get(1).copied();
         let params = params.trim();
         if params.is_empty() {
             continue;
@@ -187,11 +184,12 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
                 None if name == "*/*" => 0.0,
                 None => 1.0,
             };
-            list.push(AcceptItem { index, name, q: (q * 100.0) as i64 });
+            list.push(AcceptItem { index, name, q: (q * 100.0).trunc() });
             index += 1;
         }
     }
-    list.sort_by(|a, b| b.q.cmp(&a.q).then(a.index.cmp(&b.index)));
+    // -0.0 ties with 0.0, as both are Ruby's 0 (`ruby_to_f` never gives NaN).
+    list.sort_by(|a, b| b.q.partial_cmp(&a.q).unwrap_or(std::cmp::Ordering::Equal).then(a.index.cmp(&b.index)));
     sort_xml(&mut list);
 
     for item in &list {
@@ -239,19 +237,38 @@ fn sort_xml(list: &mut Vec<AcceptItem>) {
     }
 }
 
-/// `/;\s*q="?/`
-fn find_q_separator(s: &str) -> Option<usize> {
+/// `PARAMETER_SEPARATOR_REGEXP = /;\s*q="?/`: where the first one starts and ends.
+fn find_q_separator(s: &str) -> Option<(usize, usize)> {
     let bytes = s.as_bytes();
-    (0..bytes.len()).find(|&i| {
+    (0..bytes.len()).find_map(|i| {
         if bytes[i] != b';' {
-            return false;
+            return None;
         }
         let mut j = i + 1;
         while j < bytes.len() && bytes[j].is_ascii_whitespace() {
             j += 1;
         }
-        bytes.get(j) == Some(&b'q') && bytes.get(j + 1) == Some(&b'=')
+        if bytes.get(j) != Some(&b'q') || bytes.get(j + 1) != Some(&b'=') {
+            return None;
+        }
+        Some((i, if bytes.get(j + 2) == Some(&b'"') { j + 3 } else { j + 2 }))
     })
+}
+
+/// `String#split` with a separator finder. It drops trailing empty fields, so a `q=` with nothing
+/// after it leaves `q` nil (1.0), not "" (0.0).
+fn ruby_split(s: &str, find: impl Fn(&str) -> Option<(usize, usize)>) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut rest = s;
+    while let Some((start, end)) = find(rest) {
+        fields.push(&rest[..start]);
+        rest = &rest[end..];
+    }
+    fields.push(rest);
+    while fields.last() == Some(&"") {
+        fields.pop();
+    }
+    fields
 }
 
 /// `ACCEPT_HEADER_REGEXP = /[^,\s"](?:[^,"]|"[^"]*")*/`
@@ -289,16 +306,56 @@ fn trailing_star(accept: &str) -> Option<Vec<Format>> {
     Some(REGISTERED.iter().copied().filter(|m| m.matches(prefix)).collect())
 }
 
-/// Ruby's `String#to_f`: the longest numeric prefix, 0.0 when there is none.
-fn ruby_to_f(s: &str) -> f64 {
-    let s = s.trim_start();
-    let end = s
-        .char_indices()
-        .take_while(|(i, c)| c.is_ascii_digit() || *c == '.' || (*i == 0 && (*c == '-' || *c == '+')))
-        .map(|(i, c)| i + c.len_utf8())
-        .last()
-        .unwrap_or(0);
-    s[..end].parse().unwrap_or(0.0)
+/// Ruby's `String#to_f`: the float at the start, after whitespace (digits with an underscore
+/// allowed between two, then a fraction and an exponent), and 0.0 when there is none. `"1.2.3"`
+/// is 1.2 and `"1e2"` is 100.0. Hexadecimal isn't read.
+pub(crate) fn ruby_to_f(s: &str) -> f64 {
+    let bytes = s.trim_start_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']).as_bytes();
+    let mut number = String::new();
+    let mut i = 0;
+    if let Some(&sign @ (b'+' | b'-')) = bytes.first() {
+        number.push(sign as char);
+        i += 1;
+    }
+    let mut digits = push_digits(bytes, &mut i, &mut number);
+    if bytes.get(i) == Some(&b'.') {
+        number.push('.');
+        i += 1;
+        digits += push_digits(bytes, &mut i, &mut number);
+    }
+    if digits == 0 {
+        return 0.0;
+    }
+    if matches!(bytes.get(i), Some(b'e' | b'E')) {
+        let mut exponent = String::from("e");
+        let mut j = i + 1;
+        if let Some(&sign @ (b'+' | b'-')) = bytes.get(j) {
+            exponent.push(sign as char);
+            j += 1;
+        }
+        if push_digits(bytes, &mut j, &mut exponent) > 0 {
+            number.push_str(&exponent);
+        }
+    }
+    number.parse().unwrap_or(0.0)
+}
+
+/// Appends the digits at `bytes[*i..]` to `out`, skipping an underscore between two of them, and
+/// returns how many there were.
+fn push_digits(bytes: &[u8], i: &mut usize, out: &mut String) -> usize {
+    let mut count = 0;
+    while let Some(&b) = bytes.get(*i) {
+        match b {
+            b'0'..=b'9' => {
+                out.push(b as char);
+                count += 1;
+            }
+            b'_' if count > 0 && bytes.get(*i + 1).is_some_and(u8::is_ascii_digit) => {}
+            _ => break,
+        }
+        *i += 1;
+    }
+    count
 }
 
 /// Everything `MimeNegotiation#formats` looks at.
@@ -408,6 +465,87 @@ mod tests {
         assert_eq!(fmts(Some("application/json, */*"), "/", false), vec!["html"]);
         assert_eq!(fmts(Some("*/*, application/json;q=0.1"), "/", false), vec!["html"]);
         assert_eq!(fmts(Some("application/json;q=0.1,text/html;q=0.1"), "/", false), vec!["json", "html"]);
+    }
+
+    #[test]
+    fn q_values_read_like_rails() {
+        // `Mime::Type.parse(header)` in the reference.
+        for (accept, order) in [
+            ("text/html;q=, application/json", ["html", "json"]),
+            ("text/html; q=, application/json;q=0.5", ["html", "json"]),
+            ("text/html;q=;q=, application/json;q=0.5", ["html", "json"]),
+            ("text/html;q=0.5, application/json;q=", ["json", "html"]),
+            ("text/html;q=;x=1, application/json", ["json", "html"]),
+            ("text/html;q=;q=0.9, application/json;q=0.5", ["json", "html"]),
+            ("text/html;q=0.4;q=0.9, application/json;q=0.5", ["json", "html"]),
+            ("text/html;q=0.5.1, application/json;q=0.6", ["json", "html"]),
+            ("text/html;q=0.5.1.2, application/json;q=0.49", ["html", "json"]),
+            ("text/html;q=\"0.9\", application/json;q=0.5", ["html", "json"]),
+            ("text/html;q=\"\"0.9, application/json;q=0.5", ["json", "html"]),
+            ("text/html;q=1e-1, application/json;q=0.5", ["json", "html"]),
+            ("text/html;q=1_0, application/json;q=5", ["html", "json"]),
+            ("text/html;q=abc, application/json;q=0.1", ["json", "html"]),
+            ("text/html;q=+0.3, application/json;q=0.2", ["html", "json"]),
+            ("text/html;q= 0.3, application/json;q=0.2", ["html", "json"]),
+            ("text/html;q=1e17, application/json;q=1e18", ["json", "html"]),
+            ("text/html;q=1e19, application/json;q=1e20", ["json", "html"]),
+            ("text/html;q=-0.001, application/json;q=0", ["html", "json"]),
+            ("application/json;q=0, text/html;q=-0.001", ["json", "html"]),
+        ] {
+            assert_eq!(symbols(&parse_accept(accept).unwrap()), order, "{accept}");
+        }
+        assert_eq!(symbols(&parse_accept("*/*;q=, application/json;q=0.5").unwrap()), ["json", "*/*"]);
+        // Rails raises FloatDomainError (a 500) on an infinite q-value.
+        assert_eq!(symbols(&parse_accept("text/html;q=1e400, application/json").unwrap()), ["html", "json"]);
+        assert_eq!(symbols(&parse_accept("text/html;q=-1e400, application/json").unwrap()), ["json", "html"]);
+    }
+
+    #[test]
+    fn to_f_like_ruby() {
+        // `String#to_f` in the reference.
+        for (s, f) in [
+            ("0.5", 0.5),
+            ("0.5.1", 0.5),
+            ("1.5.5e2", 1.5),
+            ("1e2", 100.0),
+            ("1E2", 100.0),
+            ("1.2e-1", 0.12),
+            ("1.5e+2", 150.0),
+            ("1.e5", 100000.0),
+            ("1e2.5", 100.0),
+            ("1e0_1", 10.0),
+            ("1e", 1.0),
+            ("1e+", 1.0),
+            ("0.5e-", 0.5),
+            ("1e_2", 1.0),
+            ("1_0.5", 10.5),
+            ("1_2_3.4_5", 123.45),
+            ("0.5_5", 0.55),
+            ("0_0.5", 0.5),
+            ("1__0", 1.0),
+            ("1_e2", 1.0),
+            ("1._5", 1.0),
+            ("_1", 0.0),
+            (".5", 0.5),
+            ("+.5", 0.5),
+            ("-.5", -0.5),
+            ("5.", 5.0),
+            ("00.5", 0.5),
+            ("  -1.5x", -1.5),
+            ("\u{b}0.5", 0.5),
+            ("1,5", 1.0),
+            ("0x1A", 0.0),
+            (".e5", 0.0),
+            ("e5", 0.0),
+            (".", 0.0),
+            ("-", 0.0),
+            ("+", 0.0),
+            ("", 0.0),
+            ("1e-400", 0.0),
+            ("1e400", f64::INFINITY),
+        ] {
+            assert_eq!(ruby_to_f(s), f, "{s:?}");
+        }
     }
 
     #[test]

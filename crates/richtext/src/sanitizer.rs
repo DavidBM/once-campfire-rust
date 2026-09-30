@@ -381,11 +381,9 @@ fn unescape_one(s: &str) -> (Option<String>, usize) {
     let Some(end) = s.find(';') else { return (None, 0) };
     let body = &s[1..end];
     let code = if let Some(hex) = body.strip_prefix("#x").or_else(|| body.strip_prefix("#X")) {
-        (!hex.is_empty() && hex.len() <= 8 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .then(|| u32::from_str_radix(hex, 16).ok())
-            .flatten()
+        numeric_reference(hex, 16)
     } else if let Some(dec) = body.strip_prefix('#') {
-        (!dec.is_empty() && dec.len() <= 10 && dec.bytes().all(|b| b.is_ascii_digit())).then(|| dec.parse::<u32>().ok()).flatten()
+        numeric_reference(dec, 10)
     } else {
         None
     };
@@ -393,6 +391,21 @@ fn unescape_one(s: &str) -> (Option<String>, usize) {
         Some(c) => (Some(c.to_string()), end + 1),
         None => (None, 0),
     }
+}
+
+/// The code point of a numeric reference's digits, when `CGI.unescapeHTML` decodes it: any number
+/// of leading zeros, and below U+10FFFF (cgi's `escape.c` skips `cc >= charlimit`, 0x10ffff for
+/// UTF-8). Surrogates are left alone too, as a Rust string can't hold them.
+fn numeric_reference(digits: &str, radix: u32) -> Option<u32> {
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    let significant = digits.trim_start_matches('0');
+    // Past 7 decimal or 6 hex digits, it's past U+10FFFF anyway (and `u32` stays in range).
+    if significant.len() > if radix == 16 { 6 } else { 7 } {
+        return None;
+    }
+    u32::from_str_radix(if significant.is_empty() { "0" } else { significant }, radix).ok().filter(|&code| code < 0x10ffff)
 }
 
 /// `Loofah::HTML5::Scrub.decode_numeric_character_references`: `&#(x[0-9a-f]+|[0-9]+);?` (case
@@ -490,5 +503,39 @@ mod tests {
         assert!(allowed_uri("https://example.com"));
         assert!(allowed_uri("data:image/png;base64,xx"));
         assert!(!allowed_uri("data:text/html,xx"));
+        // Rails' SafeListSanitizer drops this href: CGI.unescapeHTML turns the zero-padded `&` into
+        // `&#106;`, which Loofah then decodes.
+        let list = SafeList::content_filter();
+        assert_eq!(sanitize("<a href=\"&amp;#0000000000038;#106;avascript:alert(1)\">x</a>", &list).unwrap(), "<a>x</a>");
+    }
+
+    #[test]
+    fn unescapes_html_like_cgi() {
+        // `CGI.unescapeHTML(s)` in the reference.
+        for (escaped, unescaped) in [
+            ("&#65;", "A"),
+            ("&#X41;", "A"),
+            ("&#00000000065;", "A"),
+            ("&#0000000000000000000000065;", "A"),
+            ("&#x000000041;", "A"),
+            ("&#x0000000000000000000041;", "A"),
+            ("&#00000000000000000000000000000000106;avascript", "javascript"),
+            ("&#0;", "\0"),
+            ("&#65535;", "\u{ffff}"),
+            ("&#1114110;", "\u{10fffe}"),
+            ("&#1114111;", "&#1114111;"),
+            ("&#x10FFFF;", "&#x10FFFF;"),
+            ("&#x110000;", "&#x110000;"),
+            ("&#99999999999999999999;", "&#99999999999999999999;"),
+            ("&#18446744073709551615;", "&#18446744073709551615;"),
+            ("&#x10000000000000041;", "&#x10000000000000041;"),
+            ("&#;", "&#;"),
+            ("&#x;", "&#x;"),
+            ("&#65", "&#65"),
+            ("&#0x41;", "&#0x41;"),
+            ("&amp;#65;", "&#65;"),
+        ] {
+            assert_eq!(cgi_unescape_html(escaped), unescaped, "{escaped}");
+        }
     }
 }

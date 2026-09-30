@@ -16,6 +16,8 @@ use flate2::{Compression, GzBuilder};
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
 
+use crate::format::ruby_to_f;
+
 pub mod splice;
 
 /// A response `ActionDispatch::Static` served (a public file or an asset). Marks responses the
@@ -128,32 +130,16 @@ fn parse_accept_encoding(header: &str) -> Vec<(String, f64)> {
                 Some((a, p)) => (a.trim(), Some(p.trim())),
                 None => (part, None),
             };
+            // `/\Aq=([\d.]+)/ =~ parameters`, else 1.0.
             let quality = parameters
                 .and_then(|p| p.strip_prefix("q="))
-                .map(|q| {
-                    let digits: String = q.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-                    ruby_to_f(&digits)
-                })
+                .map(|q| &q[..q.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(q.len())])
+                .filter(|digits| !digits.is_empty())
+                .map(ruby_to_f)
                 .unwrap_or(1.0);
             (attribute.to_string(), quality)
         })
         .collect()
-}
-
-/// `String#to_f` on `[\d.]+`: the longest leading float.
-fn ruby_to_f(s: &str) -> f64 {
-    let mut end = 0;
-    let mut dot = false;
-    for (i, c) in s.char_indices() {
-        if c == '.' {
-            if dot {
-                break;
-            }
-            dot = true;
-        }
-        end = i + 1;
-    }
-    s[..end].trim_end_matches('.').parse().unwrap_or(0.0)
 }
 
 /// `Rack::Utils.select_best_encoding`
@@ -251,6 +237,25 @@ mod tests {
         assert_eq!(best("*"), Some("gzip"));
         assert_eq!(best("identity;q=0, *;q=0"), None);
         assert_eq!(best("gzip;q=0, identity;q=0"), None);
+    }
+
+    #[test]
+    fn q_values_read_like_rack() {
+        // `Rack::Request#accept_encoding` and `select_best_encoding` in the reference, where
+        // `identity;q=` is a 200 and `identity;q=0` a 406.
+        assert_eq!(best("identity;q="), Some("identity"));
+        assert_eq!(best("identity;q=0"), None);
+        assert_eq!(best("gzip;q="), Some("gzip"));
+        assert_eq!(best("gzip;q=abc"), Some("gzip"));
+        assert_eq!(best("gzip;Q=0.5, identity;q=0.9"), Some("gzip"));
+        assert_eq!(best("gzip;q=.5"), Some("gzip"));
+        assert_eq!(best("gzip;q=."), Some("identity"));
+        assert_eq!(best("gzip;q=0..5, identity;q=0.1"), Some("identity"));
+        assert_eq!(best("gzip;q=0.5.1, identity;q=0.6"), Some("identity"));
+        assert_eq!(
+            parse_accept_encoding("gzip;q=0.5.1, identity;q=, br;q=1."),
+            [("gzip".to_string(), 0.5), ("identity".to_string(), 1.0), ("br".to_string(), 1.0)]
+        );
     }
 
     #[test]

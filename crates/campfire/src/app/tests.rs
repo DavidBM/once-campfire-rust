@@ -530,3 +530,31 @@ async fn proxied_blobs_name_their_file_like_rails() {
     let ranged = send(router, request(Some("bytes=0-9"))).await;
     assert_eq!((ranged.status, ranged.header("content-disposition")), (StatusCode::PARTIAL_CONTENT, expected));
 }
+
+async fn content_dispositions(router: &axum::Router, path: &str) -> (StatusCode, Vec<String>) {
+    let reply = send(router, get(path)).await;
+    let values = reply.headers.get_all(header::CONTENT_DISPOSITION).iter().map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned());
+    (reply.status, values.collect())
+}
+
+/// `send_stream` puts `?disposition=` into Content-Disposition as it is, and Puma writes a value
+/// with line breaks line by line, leaving out lines with control characters (probed in the
+/// reference, where Thruster answers a DEL with a 502).
+#[tokio::test]
+async fn proxied_blobs_write_odd_dispositions_as_puma_does() {
+    let Some(test) = boot_seeded().await else { return };
+    let router = &test.booted.router;
+    let proxy_path = vectors().blobs[0].redirect_path.replacen("/redirect/", "/proxy/", 1);
+    let with = |disposition: &str| format!("{proxy_path}?disposition={disposition}");
+
+    let (_, inline) = content_dispositions(router, &with("inline")).await;
+    let filename = inline[0].strip_prefix("inline").unwrap();
+    assert_eq!(content_dispositions(router, &with("x%0Ay")).await, (StatusCode::OK, vec!["x".into(), format!("y{filename}")]));
+    assert_eq!(content_dispositions(router, &with("%0Aa")).await, (StatusCode::OK, vec!["".into(), format!("a{filename}")]));
+    assert_eq!(content_dispositions(router, &with("x%09y")).await, (StatusCode::OK, vec![format!("x\ty{filename}")]));
+    assert_eq!(content_dispositions(router, &with("%C3%A9")).await, (StatusCode::OK, vec![format!("é{filename}")]));
+    for dropped in ["x%0Dy", "x%01y", "x%00y", "x%7Fy"] {
+        assert_eq!(content_dispositions(router, &with(dropped)).await, (StatusCode::OK, vec![]), "{dropped}");
+    }
+    assert_eq!(content_dispositions(router, &with("%FF")).await.0, StatusCode::BAD_REQUEST);
+}
