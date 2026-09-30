@@ -500,6 +500,7 @@ dependencies = [
  "jiff",
  "md-5",
  "pbkdf2",
+ "rails_compat",
  "rand 0.9.5",
  "rusqlite",
  "serde",
