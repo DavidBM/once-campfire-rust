@@ -499,33 +499,43 @@ pub fn head(status: StatusCode) -> campfire_kit::Response {
     if matches!(status.as_u16(), 100..=199 | 204 | 205 | 304) { response } else { response.content_type("text/html") }
 }
 
-/// ActiveModel's integer cast of a string attribute value (`"12abc"` → 12, `"abc"` → nil).
+/// Ruby's `ISSPACE`, which `String#to_i` skips, and `\s` in a regexp.
+const RUBY_SPACE: [char; 6] = [' ', '\t', '\n', '\u{b}', '\u{c}', '\r'];
+
+/// An id param (or cookie) as Active Record binds it for an integer column (`find`,
+/// `find_by(id:)`, `where`): `ActiveModel::Type::Integer#serialize` of a string, with the SQLite
+/// adapter's 8-byte limit. nil unless it starts like a number (`/\A\s*[+-]?\d/`), then `to_i`,
+/// and nil out of range (activemodel's `type/integer.rb`).
 pub fn cast_integer(value: &str) -> Option<i64> {
-    let value = value.trim_start();
-    let (sign, digits) = match value.as_bytes().first() {
-        Some(b'-') => (-1, &value[1..]),
-        Some(b'+') => (1, &value[1..]),
-        _ => (1, value),
-    };
-    let digits: String = digits.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse::<i64>().ok().map(|n| sign * n)
+    let unsigned = value.trim_start_matches(RUBY_SPACE);
+    let unsigned = unsigned.strip_prefix(['+', '-']).unwrap_or(unsigned);
+    if !unsigned.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    i64::try_from(ruby_to_i128(value)).ok()
 }
 
-/// `String#to_i`: optional leading whitespace and sign, then digits (underscores between them).
+/// `String#to_i`, saturating at the i64 bounds where Ruby goes on to a Bignum.
 pub fn ruby_to_i(value: &str) -> i64 {
-    let value = value.trim_start_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']);
+    ruby_to_i128(value).clamp(i64::MIN.into(), i64::MAX.into()) as i64
+}
+
+/// `String#to_i`: optional leading whitespace and sign, an optional `0d`, then digits
+/// (underscores between them). Saturating, and wide enough to tell every i64 from what's past it.
+fn ruby_to_i128(value: &str) -> i128 {
+    let value = value.trim_start_matches(RUBY_SPACE);
     let (negative, rest) = match value.as_bytes().first() {
         Some(b'-') => (true, &value[1..]),
         Some(b'+') => (false, &value[1..]),
         _ => (false, value),
     };
     let rest = rest.strip_prefix("0d").or_else(|| rest.strip_prefix("0D")).unwrap_or(rest);
-    let mut number: i64 = 0;
+    let mut number: i128 = 0;
     let mut previous_digit = false;
     for c in rest.chars() {
         match c {
             '0'..='9' => {
-                number = number.saturating_mul(10).saturating_add(i64::from(c as u8 - b'0'));
+                number = number.saturating_mul(10).saturating_add(i128::from(c as u8 - b'0'));
                 previous_digit = true;
             }
             '_' if previous_digit => previous_digit = false,
@@ -545,12 +555,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn casts_integers_like_active_model() {
-        assert_eq!(cast_integer("12"), Some(12));
-        assert_eq!(cast_integer("12abc"), Some(12));
-        assert_eq!(cast_integer(" -3"), Some(-3));
-        assert_eq!(cast_integer("abc"), None);
-        assert_eq!(cast_integer(""), None);
+    fn casts_ids_like_active_record() {
+        // `Room.type_for_attribute(:id).serialize(s)` in the reference; a RangeError is None.
+        for (value, id) in [
+            ("12", Some(12)),
+            ("12abc", Some(12)),
+            (" -3", Some(-3)),
+            (" +12abc", Some(12)),
+            ("\t\n\u{b}\u{c}\r 7", Some(7)),
+            ("\u{b}-0d7", Some(-7)),
+            ("0d12", Some(12)),
+            ("0D12", Some(12)),
+            ("0d", Some(0)),
+            ("0d_5", Some(0)),
+            ("0d0_5", Some(5)),
+            ("5_6", Some(56)),
+            ("5__6", Some(5)),
+            ("1_000", Some(1000)),
+            ("0x5", Some(0)),
+            ("-0", Some(0)),
+            ("5\0", Some(5)),
+            ("3000000000", Some(3000000000)),
+            ("9223372036854775807", Some(i64::MAX)),
+            ("-9223372036854775808", Some(i64::MIN)),
+            ("9223372036854775808", None),
+            ("-9223372036854775809", None),
+            ("99999999999999999999", None),
+            ("\u{a0}5", None),
+            ("\0 5", None),
+            ("_5", None),
+            ("--5", None),
+            ("+-5", None),
+            ("+", None),
+            ("abc", None),
+            ("", None),
+        ] {
+            assert_eq!(cast_integer(value), id, "{value:?}");
+        }
     }
 
     #[test]

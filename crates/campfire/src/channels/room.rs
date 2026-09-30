@@ -5,6 +5,7 @@ use campfire_db::{Database, Room};
 use serde_json::Value;
 
 use super::{CableUser, room_gid};
+use crate::concerns::cast_integer;
 
 pub struct RoomChannel {
     db: Database,
@@ -43,36 +44,9 @@ pub fn cast_id(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().filter(|f| f.is_finite() && f.abs() < 9.2e18).map(|f| f.trunc() as i64)),
         Value::Bool(b) => Some(i64::from(*b)),
-        Value::String(s) => ruby_to_i(s),
+        Value::String(s) => cast_integer(s),
         _ => None,
     }
-}
-
-/// `String#to_i`, for strings matching `/\A\s*[+-]?\d/`; `None` for the rest or on overflow.
-fn ruby_to_i(s: &str) -> Option<i64> {
-    let s = s.trim_start_matches(|c: char| c.is_ascii_whitespace());
-    let (negative, digits) = match s.as_bytes().first() {
-        Some(b'-') => (true, &s[1..]),
-        Some(b'+') => (false, &s[1..]),
-        _ => (false, s),
-    };
-    if !digits.starts_with(|c: char| c.is_ascii_digit()) {
-        return None;
-    }
-    let mut value: i64 = 0;
-    let mut previous_underscore = false;
-    for c in digits.chars() {
-        match c {
-            '0'..='9' => {
-                value = value.checked_mul(10)?.checked_add(i64::from(c as u8 - b'0'))?;
-                previous_underscore = false;
-            }
-            // Ruby allows single underscores between digits.
-            '_' if !previous_underscore => previous_underscore = true,
-            _ => break,
-        }
-    }
-    Some(if negative { -value } else { value })
 }
 
 #[async_trait::async_trait]
@@ -108,5 +82,10 @@ mod tests {
         assert_eq!(cast_id(&json!(true)), Some(1));
         assert_eq!(cast_id(&json!(null)), None);
         assert_eq!(cast_id(&json!("99999999999999999999")), None);
+        // Probed in the reference: Ruby's whitespace includes \v, and to_i reads a `0d` prefix.
+        assert_eq!(cast_id(&json!("\u{b}5")), Some(5));
+        assert_eq!(cast_id(&json!("0d12")), Some(12));
+        assert_eq!(cast_id(&json!("\u{a0}5")), None);
+        assert_eq!(cast_id(&json!("-9223372036854775808")), Some(i64::MIN));
     }
 }

@@ -380,7 +380,8 @@ Deliberate:
   a message are now stored without duration or bit rate, which Campfire never shows.
 - **Limits where Rails had none, or raised.** Request bodies other than file uploads are capped at
   16 MiB (a 413), and so are Active Storage direct uploads, which Campfire's editor doesn't use:
-  asking for a larger one is a 413. A QR code for more than a QR code can hold is a 422, not a 500.
+  asking for a larger one is a 413, and for one whose byte size isn't a number a 422 (Rails made
+  it 0). A QR code for more than a QR code can hold is a 422, not a 500.
   Page numbers are capped at a billion. A WebSocket connection holds up to 64 subscriptions with identifiers of up to
   4 KiB, and a client that doesn't read what it's sent for 30 seconds is disconnected. Deactivating
   or banning a user closes their open connections once the change commits.
