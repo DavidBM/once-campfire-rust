@@ -63,7 +63,7 @@ fn rolled_back_writes_emit_nothing_after_commit() {
     let attributes = NewMessage { room_id: id("designers"), creator_id: id("david"), body: Some("x".into()), ..Default::default() };
     let result: crate::Result<()> = t.try_write(move |tx| {
         Message::create(tx, attributes)?;
-        Err(crate::Error::Other("boom".into()))
+        Err(crate::Error::other("boom"))
     });
     assert!(result.is_err());
     assert!(t.events().is_empty());

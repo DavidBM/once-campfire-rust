@@ -11,7 +11,6 @@ use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions, require_current_user};
 use crate::controllers::messages::by_bots::{is_blank, raw_request_body};
 use crate::controllers::messages::present;
-use crate::controllers::presenters::page::db_error;
 
 fn before() -> Before {
     Before::default().allow_bot_access()
@@ -55,7 +54,6 @@ async fn set_message(c: &mut Ctx) -> Result<Message> {
     let message_id = c.param_str("message_id").and_then(integer_cast);
     let message = c
         .app()
-        .db
         .read(move |conn| {
             let Some(room) = room_id.map(|id| Room::find_for_user(conn, user_id, id)).transpose()?.flatten() else {
                 return Ok(None);
@@ -65,8 +63,7 @@ async fn set_message(c: &mut Ctx) -> Result<Message> {
                 None => Ok(None),
             }
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     match message {
         Some(message) => Ok(message),
         None => halt(concerns::head(StatusCode::NOT_FOUND)),

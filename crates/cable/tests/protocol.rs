@@ -382,6 +382,20 @@ async fn a_client_close_is_answered_with_its_code() {
     assert_eq!(client.next().await, Frame::Close(Some((1001, String::new()))));
 }
 
+/// websocket-driver's code for the failure, not a blanket 1002.
+#[tokio::test]
+async fn a_protocol_error_closes_with_its_code() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::{Data, OpCode};
+    let app = start(test_config()).await;
+    let mut client = app.connect(1).await;
+    assert_eq!(client.next_text().await, WELCOME);
+    let not_utf8 = tokio_tungstenite::tungstenite::protocol::frame::Frame::message(vec![0xff, 0xfe], OpCode::Data(Data::Text), true);
+    client.socket.send(Message::Frame(not_utf8)).await.unwrap();
+    assert_eq!(client.next().await, Frame::Close(Some((1007, String::new()))));
+}
+
 #[tokio::test]
 async fn a_connection_holds_a_bounded_number_of_subscriptions() {
     let app = start(test_config()).await;

@@ -8,7 +8,7 @@ use campfire_views::rooms::{RefreshShow, RefreshView};
 
 use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions};
-use crate::controllers::presenters::page::{self, db_error};
+use crate::controllers::presenters::page;
 use crate::controllers::presenters::{Presenter, room_kind};
 
 pub async fn show(c: &mut Ctx) -> Result {
@@ -21,7 +21,6 @@ pub async fn show(c: &mut Ctx) -> Result {
     let request_host = Some(c.request.host());
     let refresh = c
         .app()
-        .db
         .read(move |conn| {
             let new_messages = Message::page_created_since(conn, room.id, last_updated_at)?;
             let new_ids: Vec<i64> = new_messages.iter().map(|message| message.id).collect();
@@ -36,8 +35,7 @@ pub async fn show(c: &mut Ctx) -> Result {
                 })
             })
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     page::bare(c, StatusCode::OK, &format::TURBO_STREAM, |ctx| RefreshShow { ctx, refresh: &refresh }.render()).await
 }
 

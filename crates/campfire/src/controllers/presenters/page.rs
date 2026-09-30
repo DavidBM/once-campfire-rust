@@ -3,7 +3,7 @@
 //! broadcasts (`ApplicationController.render`).
 
 use campfire_db::{Account, Boost, Membership, Message, Room};
-use campfire_kit::{Ctx, Error, Format, Result, StatusCode};
+use campfire_kit::{Ctx, Format, Result, StatusCode};
 use campfire_views::helpers as h;
 use campfire_views::layouts::{Application, FrameLayout};
 use campfire_views::{Platform, ViewContext};
@@ -150,12 +150,5 @@ impl Partials for Rendered {
 
     fn direct_room(&self, membership: &Membership) -> String {
         self.direct_rooms.iter().find(|(id, _)| *id == membership.id).map(|(_, html)| html.clone()).unwrap_or_default()
-    }
-}
-
-pub fn db_error(error: campfire_db::Error) -> Error {
-    match error {
-        campfire_db::Error::RecordNotFound(_) => Error::NotFound,
-        other => Error::internal(other),
     }
 }

@@ -24,7 +24,7 @@ pub mod users {
         let room_id = match c.params.get("room_id").filter(|param| param.is_present()) {
             Some(param) => {
                 let id = param.as_str().and_then(integer_cast).ok_or(Error::NotFound)?;
-                let room = c.app().db.read(move |conn| Room::find_for_user(conn, user_id, id)).await.map_err(Error::internal)?;
+                let room = c.app().read(move |conn| Room::find_for_user(conn, user_id, id)).await?;
                 Some(room.ok_or(Error::NotFound)?.id)
             }
             None => None,
@@ -36,7 +36,7 @@ pub mod users {
             .find(|param| param.is_present())
             .and_then(|param| param.to_s());
 
-        let users = c.app().db.read(move |conn| autocompletable_users(conn, room_id, query.as_deref())).await.map_err(Error::internal)?;
+        let users = c.app().read(move |conn| autocompletable_users(conn, room_id, query.as_deref())).await?;
         let page = Page::new(c.param_str("page"), users.len() as i64, &[20]);
         let secrets = c.app().secrets.clone();
         let users: Vec<_> = page.records(&users).iter().map(|user| presenters::accounts::mention_user(&secrets, user)).collect();
@@ -70,6 +70,6 @@ pub mod users {
             values.push(Value::Text(format!("%{query}%")));
         }
         sql.push_str(" ORDER BY LOWER(name)");
-        presenters::accounts::query_users(conn, &sql, rusqlite::params_from_iter(values))
+        campfire_db::query_all(conn, &sql, rusqlite::params_from_iter(values), User::from_row)
     }
 }

@@ -20,7 +20,7 @@ use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions, require_current_user};
-use crate::controllers::presenters::page::{self, Rendered, db_error};
+use crate::controllers::presenters::page::{self, Rendered};
 use crate::controllers::presenters::{Presenter, user_view};
 
 /// `room_scope`: which of `Current.user.rooms` a controller may act on.
@@ -51,7 +51,7 @@ impl Scope {
 pub async fn index(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
     let user_id = require_current_user(c)?.id;
-    let room = c.app().db.read(move |conn| Room::last_for_user(conn, user_id)).await.map_err(db_error)?;
+    let room = c.app().read(move |conn| Room::last_for_user(conn, user_id)).await?;
     let Some(room) = room else {
         return Err(Error::internal(anyhow::anyhow!("No route matches room_url(nil)")));
     };
@@ -84,7 +84,7 @@ pub async fn destroy_without_room(c: &mut Ctx) -> Result {
 
 pub(crate) async fn destroy_room(c: &mut Ctx, room: Room) -> Result {
     let destroyed = room.clone();
-    c.app().db.write(move |tx| destroyed.destroy(tx)).await.map_err(db_error)?;
+    c.app().write(move |tx| destroyed.destroy(tx)).await?;
     // broadcast_remove_to :rooms, target: [ @room, :list ]
     c.app().broadcasts.room_remove(&room);
     redirect_to_root(c)
@@ -98,7 +98,7 @@ pub async fn set_room(c: &mut Ctx, scope: Scope) -> Result<Room> {
     let user_id = require_current_user(c)?.id;
     let id = c.param_str("room_id").or_else(|| c.param_str("id")).and_then(integer_cast);
     let room = match id {
-        Some(id) => c.app().db.read(move |conn| Room::find_for_user(conn, user_id, id)).await.map_err(db_error)?,
+        Some(id) => c.app().read(move |conn| Room::find_for_user(conn, user_id, id)).await?,
         None => None,
     };
     match room.filter(|room| scope.includes(room)) {
@@ -123,7 +123,7 @@ pub fn ensure_can_administer(c: &mut Ctx, room: &Room) -> Result<()> {
 /// `ensure_permission_to_create_rooms`
 pub async fn ensure_permission_to_create_rooms(c: &mut Ctx) -> Result<()> {
     let administrator = require_current_user(c)?.is_administrator();
-    let account = c.app().db.read(Account::first).await.map_err(db_error)?;
+    let account = c.app().read(Account::first).await?;
     let restricted = account.is_some_and(|account| account.settings().restrict_room_creation_to_administrators());
     if restricted && !administrator {
         return halt(concerns::head(StatusCode::FORBIDDEN));
@@ -171,7 +171,6 @@ pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered>
     let room = room.clone();
     let html = c
         .app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let sidebar_room = presenter.sidebar_room(&room);
@@ -180,8 +179,7 @@ pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered>
                 campfire_views::users::SidebarSharedPartial { room: sidebar_room }.render()
             }))
         })
-        .await
-        .map_err(db_error)?
+        .await?
         .map_err(Error::internal)?;
     Ok(Rendered { shared_room: Some(html), ..Rendered::default() })
 }
@@ -194,7 +192,6 @@ async fn render_show(c: &mut Ctx, room: Room) -> Result {
     let request_host = Some(c.request.host());
     let show = c
         .app()
-        .db
         .read(move |conn| {
             let messages = match message_id.map(|id| Message::find_by_id(conn, id)).transpose()?.flatten() {
                 Some(message) if message.room_id == room.id => Message::page_around(conn, room.id, &message)?,
@@ -214,8 +211,7 @@ async fn render_show(c: &mut Ctx, room: Room) -> Result {
                 messages_stream_name: rails_compat::turbo::signed_stream_name(&app.secrets, &[&room_gid, "messages"]),
             })
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     let response = page::framed_page!(c, StatusCode::OK, |ctx| campfire_views::rooms::Show { ctx, show: &show }).await?;
     let fragments = campfire_views::messages::MessageItem::cached_fragments(&c.app().fragment_cache, &show.messages);
     Ok(response.with_cached_fragments(fragments))

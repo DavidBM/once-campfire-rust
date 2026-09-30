@@ -2,7 +2,7 @@
 //! account logo (or the stock app icon) as a PNG, public so it can be the PWA icon.
 
 use campfire_db::Account;
-use campfire_kit::{Ctx, Error, ExpiresIn, Freshness, Result, SendOptions};
+use campfire_kit::{Ctx, ExpiresIn, Freshness, Result, SendOptions};
 use campfire_storage::Variation;
 
 use crate::app::AppCtx;
@@ -19,7 +19,7 @@ const STALE_WHILE_REVALIDATE: u64 = 7 * 24 * 60 * 60;
 pub async fn show(c: &mut Ctx) -> Result {
     c.use_live_response(); // `include ActiveStorage::Streaming`
     concerns::before_actions(c, Before::default().allow_unauthenticated_access()).await?;
-    let account = c.app().db.read(Account::first).await.map_err(Error::internal)?;
+    let account = c.app().read(Account::first).await?;
 
     // `stale?(etag: Current.account)`; there's no accounts/logos/show template to digest.
     let freshness = Freshness {
@@ -66,7 +66,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     concerns::ensure_can_administer(c)?;
     let account = super::current_account(c).await?;
-    c.app().db.write(move |tx| attachments::destroy(tx, Record::account(account.id), "logo")).await.map_err(Error::internal)?;
+    c.app().write(move |tx| attachments::destroy(tx, Record::account(account.id), "logo")).await?;
     let location = c.url_for(&campfire_routes::edit_account());
     c.redirect_to(&location)
 }

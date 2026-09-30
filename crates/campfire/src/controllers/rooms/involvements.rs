@@ -7,7 +7,7 @@ use campfire_views::rooms::{InvolvementShow, InvolvementView};
 
 use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions};
-use crate::controllers::presenters::page::{self, db_error};
+use crate::controllers::presenters::page;
 use crate::controllers::presenters::room_kind;
 use crate::controllers::rooms::render_shared_room;
 
@@ -29,14 +29,12 @@ pub async fn update(c: &mut Ctx) -> Result {
     let previous = membership.involvement;
     let membership = c
         .app()
-        .db
         .write(move |tx| {
             let mut membership = membership;
             membership.update_involvement(tx, involvement)?;
             Ok(membership)
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
 
     // broadcast_visibility_changes
     let partials = render_shared_room(c, &room).await?;
