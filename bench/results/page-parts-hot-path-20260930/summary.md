@@ -9,7 +9,9 @@ The `perf-splice` branch, from `d93d3dd`, one commit per change:
    performance change.
 4. `7a1776d` A text part's SHA-256 is remembered by its bytes (foldhash plus a compare), in a
    16 MB two-generation map with a 256 KB per-entry cap.
-5. `b0e7d15` A piece names its predecessor by SHA-256; the `_pin` Weaks are gone.
+5. `b0e7d15` A piece names its predecessor by SHA-256, so the predecessors' `_pin` Weaks are
+   gone. The fragment map keeps its own `_pin`, which stops an `Arc`'s address from being reused
+   while it's a key.
 6. `a145d4e` FRAGMENTS is a 32 MB two-generation map instead of 8,192 entries with `retain` and
    `clear()`.
 
