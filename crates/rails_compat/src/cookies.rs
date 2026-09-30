@@ -88,17 +88,10 @@ pub fn encrypted_cookie_encryptor(secrets: &Secrets) -> MessageEncryptor {
 }
 
 /// `Rack::Utils.escape` (`URI.encode_www_form_component`), which Rack applies to every cookie
-/// value it writes: `*-._` and alphanumerics stay, a space becomes `+`, the rest is `%XX`.
+/// value it writes: `*-._` and alphanumerics stay, a space becomes `+`, the rest is `%XX`. That's
+/// the form encoding the `form_urlencoded` crate writes.
 pub fn escape(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for &byte in raw.as_bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => out.push(byte as char),
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    form_urlencoded::byte_serialize(raw.as_bytes()).collect()
 }
 
 /// `Rack::Utils.parse_cookies_header`'s `unescape(value) rescue value`: `+` is a space, `%XX` is
