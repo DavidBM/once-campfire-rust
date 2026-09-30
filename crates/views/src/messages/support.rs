@@ -68,7 +68,9 @@ impl std::fmt::Display for RubyNumber {
     }
 }
 
-/// `Float#to_s`.
+/// `Float#to_s`: plain decimals from 1e-4 up to (not including) 1e15, and above that while the
+/// shortest digits still reach past the decimal point (`1000000000000000.1`); the exponent form
+/// otherwise (`flo_to_s` in Ruby 3.4's numeric.c).
 pub fn ruby_float(value: f64) -> String {
     if value.is_nan() {
         return "NaN".into();
@@ -76,8 +78,7 @@ pub fn ruby_float(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
     }
-    let magnitude = value.abs();
-    if magnitude != 0.0 && !(1e-4..1e16).contains(&magnitude) {
+    if !fixed_form(value.abs()) {
         // Rust: "1.5e16", Ruby: "1.5e+16"; Rust: "1e16", Ruby: "1.0e+16".
         let formatted = format!("{value:e}");
         let (mantissa, exponent) = formatted.split_once('e').unwrap();
@@ -90,6 +91,12 @@ pub fn ruby_float(value: f64) -> String {
     if formatted.contains('.') { formatted } else { format!("{formatted}.0") }
 }
 
+/// Below 2^53 every whole number is exact, so from 1e15 a fraction is exactly when the shortest
+/// digits reach past the decimal point.
+fn fixed_form(magnitude: f64) -> bool {
+    magnitude == 0.0 || (1e-4..1e15).contains(&magnitude) || ((1e15..1e16).contains(&magnitude) && magnitude.fract() != 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +107,41 @@ mod tests {
         assert_eq!(epoch_ms(time), 1790425426483);
         let time: Timestamp = "2026-09-26T11:23:46Z".parse().unwrap();
         assert_eq!(epoch_ms(time), 1790421826000);
+    }
+
+    #[test]
+    fn float_to_s_like_ruby_3_4() {
+        // `Float#to_s` in the reference (Ruby 3.4.10): from 1e15, the exponent form unless there
+        // are digits after the decimal point.
+        for (f, s) in [
+            (100.0, "100.0"),
+            (0.1, "0.1"),
+            (0.0001, "0.0001"),
+            (0.00012345, "0.00012345"),
+            (1e-5, "1.0e-05"),
+            (1.5e-7, "1.5e-07"),
+            (5e-324, "5.0e-324"),
+            (1e14, "100000000000000.0"),
+            (123456789012345.6, "123456789012345.6"),
+            (999999999999999.0, "999999999999999.0"),
+            (999999999999999.9, "999999999999999.9"),
+            (-999999999999999.0, "-999999999999999.0"),
+            (1e15, "1.0e+15"),
+            (-1e15, "-1.0e+15"),
+            (1.5e15, "1.5e+15"),
+            (1234567890123456.0, "1.234567890123456e+15"),
+            (9007199254740992.0, "9.007199254740992e+15"),
+            (1000000000000001.0, "1.000000000000001e+15"),
+            (1963684456584958.8, "1963684456584958.8"),
+            (1000000000000000.1, "1000000000000000.1"),
+            (2251799813685248.5, "2251799813685248.5"),
+            (-2551800308696183.5, "-2551800308696183.5"),
+            (1e16, "1.0e+16"),
+            (1e20, "1.0e+20"),
+            (f64::MAX, "1.7976931348623157e+308"),
+        ] {
+            assert_eq!(ruby_float(f), s, "{f:e}");
+        }
     }
 
     #[test]
