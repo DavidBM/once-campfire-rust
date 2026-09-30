@@ -294,7 +294,7 @@ fn with_disposition(response: Response, disposition: &str, blob: &Blob) -> Respo
 fn send_blob_byte_range_data(c: &mut Ctx, blob: &Blob, range: &str) -> Result {
     let storage = c.app().storage.clone();
     let size = blob.byte_size.max(0) as u64;
-    let ranges = match file_server::byte_ranges(Some(range), size) {
+    let ranges = match ruby_compat::rack::byte_ranges(Some(range), size) {
         Some(ranges) if !ranges.is_empty() => ranges,
         _ => return Ok(c.head(StatusCode::RANGE_NOT_SATISFIABLE)),
     };
