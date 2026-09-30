@@ -1,18 +1,8 @@
 //! URL building that `campfire_routes` leaves to the caller: query strings (`Hash#to_query`)
 //! and format extensions (`path(format: :json)`).
 
-/// `CGI.escape`: everything but `A-Za-z0-9_.-~` is percent-encoded, and spaces become `+`.
-pub fn cgi_escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => out.push(byte as char),
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
+/// `CGI.escape`, for templates too.
+pub use ruby_compat::cgi_escape;
 
 /// A query parameter value: a scalar or an array (`key[]=a&key[]=b`).
 pub enum Param {

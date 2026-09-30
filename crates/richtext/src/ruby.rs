@@ -44,19 +44,6 @@ pub fn truncate(text: &str, length: usize, omission: &str) -> String {
     out
 }
 
-/// `ERB::Util.url_encode`: percent-encodes everything but unreserved characters.
-pub fn url_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{:02X}", b));
-        }
-    }
-    out
-}
-
 /// Ruby's `JSON.parse`, which (unlike serde_json) also skips `/* */` and `//` comments.
 pub fn json_parse(s: &str) -> Option<Value> {
     serde_json::from_str(&strip_json_comments(s)?).ok()
