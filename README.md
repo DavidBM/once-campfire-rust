@@ -476,8 +476,11 @@ Deliberate:
   doesn't write), saving or editing the message raises after it commits: the request answers 500,
   and the message isn't indexed for search, pushed, broadcast or sent to bots. The app logs the
   error and gives the message an empty plain text (or its attachment's filename), so it goes out
-  like any other; its page shows it as unrenderable, as in Rails. A body past the HTML parser's
-  limits, which is stored as it came, gets an empty plain text the same way.
+  like any other; its page shows it as unrenderable, as in Rails.
+- **A body past the HTML parser's limits is saved.** Rails refuses a body nested more than 400
+  levels deep, or with an element carrying more than 400 attributes, as soon as it's assigned: the
+  request answers 500 and nothing is saved or changed. The app stores such a body as it came, gives
+  it an empty plain text as above, and its page shows it as unrenderable.
 - **Not ported:** the duplicate `session_token` cookie Rails' Active Storage streaming sends; and
   legacy AES-CBC encrypted cookies, since Campfire started on GCM.
 
