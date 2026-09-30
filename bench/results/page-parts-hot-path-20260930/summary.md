@@ -65,4 +65,33 @@ request (`wave3-20260930`).
   separated by ordinary markup, and +9.7 µs when every fifth byte is a `<`. No template does this.
   Every template puts `"\n    "`, `"\n"` or a turbo-stream wrapper (under 256 B) between messages.
 
-HTTP A/B to follow (the coordinator's run).
+## HTTP A/B
+
+Measured over HTTP alongside the other page-path branches, in
+[`hot-paths-http-20260930`](../hot-paths-http-20260930/summary.md): `main` at `0dbd10d` (the same code
+as `d93d3dd`) against `68444f7`, native release builds interleaved over 5 reps. Another project
+raised the host's load average from 5 to 16 during the run. At one client, req/s moves by up to 20%
+between reps of the same build. Medians:
+
+| Route | Clients | main req/s | branch req/s | main CPU µs/req | branch CPU µs/req | p99 main → branch |
+|---|---|---|---|---|---|---|
+| room_show | 1 | 4,922 | 5,464 (1.11×) | 196.6 | 175.3 (-21.3) | 0.28 → 0.28 ms |
+| room_show | 16 | 19,496 | 21,620 (1.11×) | 195.9 | 172.4 (-23.5) | 1.56 → 1.53 ms |
+| room_show | 64 | 19,281 | 21,791 (1.13×) | 195.9 | 171.3 (-24.6) | 5.64 → 4.91 ms |
+| messages_page | 1 | 5,503 | 6,075 (1.10×) | 179.2 | 163.0 (-16.2) | 0.27 → 0.25 ms |
+| messages_page | 16 | 22,442 | 23,477 (1.05×) | 164.4 | 152.6 (-11.8) | 1.53 → 1.48 ms |
+| messages_page | 64 | 22,514 | 24,557 (1.09×) | 164.6 | 152.5 (-12.1) | 4.84 → 4.43 ms |
+| sidebar | 1 | 4,747 | 6,019 (1.27×) | 193.0 | 159.2 (-33.8) | 0.33 → 0.24 ms |
+| sidebar | 16 | 21,485 | 23,188 (1.08×) | 169.0 | 155.9 (-13.1) | 1.57 → 1.48 ms |
+| sidebar | 64 | 22,186 | 24,320 (1.10×) | 166.6 | 153.2 (-13.4) | 5.02 → 4.50 ms |
+| search | 1 | 5,758 | 6,928 (1.20×) | 165.2 | 143.2 (-22.0) | 0.28 → 0.23 ms |
+| search | 16 | 22,490 | 24,652 (1.10×) | 161.7 | 147.1 (-14.6) | 1.50 → 1.39 ms |
+| search | 64 | 23,128 | 25,751 (1.11×) | 161.6 | 145.3 (-16.3) | 4.57 → 4.20 ms |
+| post_message | 1 | 1,856 | 1,913 (1.03×) | 551.7 | 552.4 (+0.7) | 1.83 → 1.81 ms |
+| post_message | 16 | 5,343 | 5,104 (0.96×) | 552.9 | 564.5 (+11.6) | 8.01 → 7.96 ms |
+| post_message | 64 | 5,471 | 5,408 (0.99×) | 547.4 | 556.9 (+9.5) | 19.63 → 23.61 ms |
+
+Page routes save 12–25 µs of CPU per request at 16 and 64 clients (7–13%) and serve 5–13% more
+requests. room_show is 1.11× at 16 clients and 1.13× at 64. With one user in one room the text map
+hits on every request, so this is an upper bound (see above). post_message renders no page and is
+unchanged within noise.
