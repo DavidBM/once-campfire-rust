@@ -260,10 +260,22 @@ fn locate<'a>(body: &[u8], fragments: &'a [Arc<String>]) -> Vec<(&'a Arc<String>
     located
 }
 
-/// The first occurrence of `needle` in `body` at or after `from`. Finding a short prefix and
-/// comparing the rest is much cheaper than a whole-needle search, whose setup is linear in the
-/// needle and is paid per fragment.
+/// The first occurrence of `needle` (never empty: `locate` passes only fragments of at least
+/// [`MIN_FRAGMENT`] bytes) in `body` at or after `from`. On a page of messages the next fragment
+/// nearly always starts within [`MAX_GLUE`] bytes of the previous one, and scanning that window
+/// first is cheaper than setting up a substring search, which is paid per fragment. The window's
+/// starts are tried in order before the search goes past it, so the first occurrence still wins.
 fn find(body: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    let near = &body[from..body.len().min(from + MAX_GLUE + 1)];
+    memchr::memchr_iter(needle[0], near)
+        .map(|at| from + at)
+        .find(|&start| body[start..].starts_with(needle))
+        .or_else(|| find_far(body, from + near.len(), needle))
+}
+
+/// [`find`] past the window. Finding a short prefix and comparing the rest is much cheaper than a
+/// whole-needle search, whose setup is linear in the needle.
+fn find_far(body: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     let prefix = &needle[..needle.len().min(64)];
     let finder = memchr::memmem::Finder::new(prefix);
     let mut at = from;
@@ -503,6 +515,32 @@ mod tests {
         let listed = vec![a.clone(), b.clone(), a.clone(), b.clone(), a.clone()];
         for _ in 0..2 {
             assert_eq!(gunzip(&gzip(&body, &listed)), body.as_bytes());
+        }
+    }
+
+    #[test]
+    fn find_is_the_first_occurrence_at_or_after_from() {
+        // Bodies dense in the bytes fragments start with, so near misses and repeats are common on
+        // both sides of the window.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        for _ in 0..5_000 {
+            let body: Vec<u8> = (0..1 + next(2_000)).map(|_| b"<<\n a"[next(5)]).collect();
+            let (needle, from): (Vec<u8>, _) = if next(2) == 0 {
+                // A needle from the body, often at either edge of the window.
+                let start = next(body.len());
+                let distance = [0, 1, MAX_GLUE, MAX_GLUE + 1, MAX_GLUE + 2, next(2_000)][next(6)];
+                (body[start..body.len().min(start + 1 + next(300))].to_vec(), start.saturating_sub(distance))
+            } else {
+                ((0..1 + next(4)).map(|_| b"<<\n a"[next(5)]).collect(), next(body.len() + 1))
+            };
+            let first = body[from..].windows(needle.len()).position(|window| window == needle).map(|at| from + at);
+            assert_eq!(find(&body, from, &needle), first, "{needle:?} from {from}");
         }
     }
 
