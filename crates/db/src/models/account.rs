@@ -54,7 +54,7 @@ impl AccountSettings {
             match *key {
                 RESTRICT_ROOM_CREATION => self.set_restrict_room_creation_to_administrators(value),
                 other => {
-                    return Err(Error::Other(format!("undefined method '{other}=' for account settings")));
+                    return Err(Error::other(format!("undefined method '{other}=' for account settings")));
                 }
             }
         }

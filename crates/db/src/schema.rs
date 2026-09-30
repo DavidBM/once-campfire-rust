@@ -77,7 +77,7 @@ pub fn prepare(conn: &mut Connection, environment: &str, clock: &dyn Clock) -> R
     let prepared = if table_exists(conn, "schema_migrations")? {
         let pending = pending_migrations(conn)?;
         if !pending.is_empty() {
-            return Err(Error::Other(format!("pending migrations: {}", pending.join(", "))));
+            return Err(Error::other(format!("pending migrations: {}", pending.join(", "))));
         }
         Prepared::UpToDate
     } else {

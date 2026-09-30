@@ -14,12 +14,12 @@ use campfire_richtext::Content;
 use campfire_storage::{Blob, Staged, Variation};
 use campfire_views::messages as views;
 
-use crate::active_storage::{self, keep_after_commit};
+use crate::active_storage::{self, keep_after_commit, storage_error};
 use crate::app::{App, AppCtx};
 use crate::concerns::{self, Before, before_actions, cast_integer, require_current_user};
 use crate::controllers::presenters::attachments::Assignment;
-use crate::controllers::presenters::page::{self, Rendered, db_error};
-use crate::controllers::presenters::{DbResolver, Presenter, cache_key_with_version, room_kind, storage_error};
+use crate::controllers::presenters::page::{self, Rendered};
+use crate::controllers::presenters::{DbResolver, Presenter, cache_key_with_version, room_kind};
 
 // --- Actions ------------------------------------------------------------------------------------
 
@@ -75,7 +75,6 @@ pub async fn create(c: &mut Ctx) -> Result {
     let base_url = c.url_for("");
     let html = c
         .app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let item = campfire_views::fragment_cache::with(&app.fragment_cache, || presenter.message_item(&message))?;
@@ -83,10 +82,9 @@ pub async fn create(c: &mut Ctx) -> Result {
             page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
                 views::CreateStream { ctx, message: &item, room_kind: kind }.render()
             })
-            .map_err(|e| campfire_db::Error::Other(e.to_string()))
+            .map_err(campfire_db::Error::other)
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     Ok(c.render(StatusCode::OK, &format::TURBO_STREAM, html))
 }
 
@@ -149,7 +147,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 pub(crate) async fn set_message(c: &mut Ctx, room: &Room) -> Result<Message> {
     let Some(id) = c.param_str("id").and_then(cast_integer) else { return Err(Error::NotFound) };
     let room_id = room.id;
-    c.app().db.read(move |conn| Message::find_in_room(conn, room_id, id)).await.map_err(db_error)
+    c.app().read(move |conn| Message::find_in_room(conn, room_id, id)).await
 }
 
 /// `head :forbidden unless Current.user.can_administer?(@message)`
@@ -192,7 +190,6 @@ pub(crate) async fn find_paged_messages(c: &Ctx, room: &Room) -> Result<Vec<Mess
     let (before, after) = (present("before"), present("after"));
     let room_id = room.id;
     c.app()
-        .db
         .read(move |conn| match (before, after) {
             (Some(before), _) => {
                 let message = Message::find_in_room(conn, room_id, before.ok_or(campfire_db::Error::RecordNotFound("Message"))?)?;
@@ -205,7 +202,6 @@ pub(crate) async fn find_paged_messages(c: &Ctx, room: &Room) -> Result<Vec<Mess
             (None, None) => Message::last_page(conn, room_id),
         })
         .await
-        .map_err(db_error)
 }
 
 // --- Creating, updating, destroying ---------------------------------------------------------------
@@ -227,7 +223,6 @@ pub(crate) async fn create_message(c: &Ctx, room: &Room, attributes: MessagePara
     };
     let (message, blob) = c
         .app()
-        .db
         .write(move |tx| {
             let blob = attachment.map(|staged| save_staged(tx, staged)).transpose()?;
             let message = Message::create(
@@ -242,13 +237,12 @@ pub(crate) async fn create_message(c: &Ctx, room: &Room, attributes: MessagePara
             )?;
             Ok((message, blob))
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     if let Some(blob) = blob {
         process_attachment(c.app(), blob).await?;
     }
     let id = message.id;
-    c.app().db.read(move |conn| Message::find(conn, id)).await.map_err(db_error)
+    c.app().read(move |conn| Message::find(conn, id)).await
 }
 
 /// Inserts a staged blob's row, keeping its file once the transaction commits.
@@ -261,7 +255,7 @@ pub(crate) fn save_staged(tx: &mut campfire_db::Tx<'_>, staged: Staged) -> campf
 /// [`canonical_body`] on a reader, ahead of the write that stores it.
 pub(crate) async fn canonicalize_body(app: &App, body: String, request_host: Option<String>) -> Result<String> {
     let app2 = app.clone();
-    app.db.read(move |conn| Ok(canonical_body(conn, &app2, &body, request_host))).await.map_err(db_error)
+    app.read(move |conn| Ok(canonical_body(conn, &app2, &body, request_host))).await
 }
 
 /// Assigning a String to a rich text attribute stores the canonicalized content
@@ -296,15 +290,13 @@ pub(crate) async fn process_attachment(app: &App, blob: Blob) -> Result<()> {
 /// writer.
 async fn analyze_attachment(app: &App, blob: Blob) -> Result<Blob> {
     let metadata = active_storage::analyzed_metadata(app, &blob).await?;
-    app.db
-        .write(move |tx| {
-            let mut blob = blob;
-            blob.update_metadata(tx.conn(), metadata).map_err(storage_error)?;
-            touch_attachment_records(tx, blob.id)?;
-            Ok(blob)
-        })
-        .await
-        .map_err(db_error)
+    app.write(move |tx| {
+        let mut blob = blob;
+        blob.update_metadata(tx.conn(), metadata).map_err(storage_error)?;
+        touch_attachment_records(tx, blob.id)?;
+        Ok(blob)
+    })
+    .await
 }
 
 /// `Blob#touch_attachments`: each attached record is touched (a message also touches its room).
@@ -333,7 +325,6 @@ pub(crate) async fn update_message(c: &Ctx, message: Message, attributes: Messag
     };
     let (id, blob) = c
         .app()
-        .db
         .write(move |tx| {
             let mut message = message;
             if let Some(body) = body {
@@ -346,21 +337,20 @@ pub(crate) async fn update_message(c: &Ctx, message: Message, attributes: Messag
             }
             Ok((message.id, blob))
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     if let Some(blob) = blob.filter(|blob| !blob.is_analyzed()) {
         let job_app = c.app().clone();
         c.app().jobs.perform_later("ActiveStorage::AnalyzeJob", async move {
             analyze_attachment(&job_app, blob).await.map(drop).map_err(|e| anyhow::anyhow!("{e:?}"))
         });
     }
-    c.app().db.read(move |conn| Message::find(conn, id)).await.map_err(db_error)
+    c.app().read(move |conn| Message::find(conn, id)).await
 }
 
 /// `@message.destroy` then `@message.broadcast_remove`.
 pub(crate) async fn destroy_message(c: &Ctx, room: &Room, message: &Message) -> Result<()> {
     let destroyed = message.clone();
-    c.app().db.write(move |tx| destroyed.destroy(tx)).await.map_err(db_error)?;
+    c.app().write(move |tx| destroyed.destroy(tx)).await?;
     c.app().broadcasts.message_remove(room, message);
     Ok(())
 }
@@ -372,7 +362,6 @@ pub(crate) async fn broadcast_create(c: &Ctx, room: &Room, message: &Message) ->
     let (app, room, message) = (c.app().clone(), room.clone(), message.clone());
     let base_url = page::renderer_base_url(c);
     c.app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let view = presenter.message(&message)?;
@@ -382,7 +371,6 @@ pub(crate) async fn broadcast_create(c: &Ctx, room: &Room, message: &Message) ->
             app.broadcasts.message_create(conn, &room, &message, &partials)
         })
         .await
-        .map_err(db_error)
 }
 
 /// `broadcast_replace_to @room, :messages, target: [ @message, :presentation ], partial:
@@ -391,7 +379,6 @@ pub(crate) async fn broadcast_replace(c: &Ctx, room: &Room, message: &Message) -
     let (app, room, message) = (c.app().clone(), room.clone(), message.clone());
     let base_url = page::renderer_base_url(c);
     c.app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let view = presenter.message(&message)?;
@@ -399,13 +386,12 @@ pub(crate) async fn broadcast_replace(c: &Ctx, room: &Room, message: &Message) -
             let html = page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
                 views::PresentationPartial { ctx, message: &view }.render()
             })
-            .map_err(|e| campfire_db::Error::Other(e.to_string()))?;
+            .map_err(campfire_db::Error::other)?;
             let partials = Rendered { message_presentation: Some(html), ..Rendered::default() };
             app.broadcasts.message_replace(&room, &message, &partials);
             Ok(())
         })
         .await
-        .map_err(db_error)
 }
 
 /// `deliver_webhooks_to_bots`: every active bot in a direct room, else every mentioned active
@@ -414,7 +400,6 @@ pub(crate) async fn deliver_webhooks_to_bots(c: &Ctx, room: &Room, message: &Mes
     let (app, room, eligible) = (c.app().clone(), room.clone(), message.clone());
     let bots: Vec<User> = c
         .app()
-        .db
         .read(move |conn| {
             let candidates = if room.direct() { room.active_bots(conn)? } else { eligible.mentionees(conn, &*app.db.env().rich_text)? };
             Ok(candidates
@@ -422,14 +407,13 @@ pub(crate) async fn deliver_webhooks_to_bots(c: &Ctx, room: &Room, message: &Mes
                 .filter(|user| user.role == Role::Bot && user.status == Status::Active && user.id != eligible.creator_id)
                 .collect())
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     if bots.is_empty() {
         return Ok(());
     }
     // bot.deliver_webhook_later(@message)
     let message_id = message.id;
-    c.app().db.write(move |tx| bots.iter().try_for_each(|bot| bot.deliver_webhook_later(tx, message_id))).await.map_err(db_error)
+    c.app().write(move |tx| bots.iter().try_for_each(|bot| bot.deliver_webhook_later(tx, message_id))).await
 }
 
 // --- Rendering ------------------------------------------------------------------------------------
@@ -442,14 +426,12 @@ pub(crate) async fn present<T: Send + 'static>(
     let app = c.app().clone();
     let request_host = Some(c.request.host());
     c.app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, request_host);
             // The Jbuilder partials (`json.cache!`) read the fragment cache on this thread.
             campfire_views::fragment_cache::with(&app.fragment_cache, || f(&presenter))
         })
         .await
-        .map_err(db_error)
 }
 
 /// `render action: :room_not_found` (inside the layout).

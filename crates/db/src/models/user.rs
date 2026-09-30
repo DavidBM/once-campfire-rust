@@ -573,7 +573,7 @@ impl PasswordDigest {
 
     /// [`PasswordDigest::create`] on the blocking pool.
     pub async fn hash(password: String, cost: u32) -> Result<Self> {
-        tokio::task::spawn_blocking(move || Self::create(&password, cost)).await.map_err(|e| crate::Error::Other(e.to_string()))?
+        tokio::task::spawn_blocking(move || Self::create(&password, cost)).await.map_err(crate::Error::other)?
     }
 
     pub fn into_string(self) -> String {
@@ -583,7 +583,7 @@ impl PasswordDigest {
 
 /// `BCrypt::Password.create(password, cost:)`, in the `$2a$` format bcrypt-ruby writes.
 pub fn password_digest(password: &str, cost: u32) -> Result<String> {
-    rails_compat::password::digest_with_cost(password, cost).map_err(|e| crate::Error::Other(e.to_string()))
+    rails_compat::password::digest_with_cost(password, cost).map_err(crate::Error::other)
 }
 
 const DUMMY_DIGEST: &str = "$2a$12$FiKmSp4UhLvSB4Sd/ZUjQunyKP6.NjDRHdr5LnKUVk.BUn4Mq12WS";

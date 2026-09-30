@@ -635,12 +635,13 @@ impl Ctx {
         }
     }
 
-    /// What `ShowExceptions` + `PublicExceptions` render for an error raised in the action.
+    /// What `ShowExceptions` + `PublicExceptions` render for an error raised in the action. The
+    /// log line has the error's sources too (`{:#}`: "outer: cause: ...").
     fn error_response(&mut self, error: Error) -> Response {
         if error.status().is_server_error() {
-            tracing::error!(error = %error, path = self.request.path(), "request failed");
+            tracing::error!(error = %format_args!("{error:#}"), path = self.request.path(), "request failed");
         } else {
-            tracing::info!(error = %error, path = self.request.path(), "request rejected");
+            tracing::info!(error = %format_args!("{error:#}"), path = self.request.path(), "request rejected");
         }
         let formats = self.formats().unwrap_or_default();
         crate::exceptions::render(self.kit.error_pages(), error.status(), formats.first().copied(), self.request.is_head())

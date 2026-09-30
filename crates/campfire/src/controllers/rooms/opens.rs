@@ -11,7 +11,7 @@ use super::{
 };
 use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions, require_current_user};
-use crate::controllers::presenters::page::{self, db_error};
+use crate::controllers::presenters::page;
 use crate::controllers::presenters::user_view;
 
 /// `DEFAULT_ROOM_NAME`
@@ -41,8 +41,7 @@ pub async fn create(c: &mut Ctx) -> Result {
     let name = room_name_param(c)?.flatten();
     let user_id = require_current_user(c)?.id;
     // Rooms::Open.create_for(room_params, users: Current.user)
-    let room =
-        c.app().db.write(move |tx| Room::create_for(tx, RoomType::Open, name.as_deref(), user_id, &[user_id])).await.map_err(db_error)?;
+    let room = c.app().write(move |tx| Room::create_for(tx, RoomType::Open, name.as_deref(), user_id, &[user_id])).await?;
     let partials = render_shared_room(c, &room).await?;
     c.app().broadcasts.open_room_create(&room, &partials);
     redirect_to_room(c, room.id)
@@ -68,14 +67,12 @@ pub async fn update(c: &mut Ctx) -> Result {
     // force_room_type, then `@room.update! room_params` saves the name and the new type.
     let room = c
         .app()
-        .db
         .write(move |tx| {
             let mut room = room;
             room.update(tx, name.as_ref().map(|name| name.as_deref()), Some(RoomType::Open))?;
             Ok(room)
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     let partials = render_shared_room(c, &room).await?;
     c.app().broadcasts.open_room_update(&room, &partials);
     redirect_to_room(c, room.id)
@@ -84,9 +81,5 @@ pub async fn update(c: &mut Ctx) -> Result {
 /// `User.active.ordered`
 pub(super) async fn active_users(c: &Ctx) -> Result<Vec<campfire_views::messages::UserView>> {
     let secrets = c.app().secrets.clone();
-    c.app()
-        .db
-        .read(move |conn| Ok(User::active_ordered(conn)?.iter().map(|user| user_view(&secrets, user)).collect()))
-        .await
-        .map_err(db_error)
+    c.app().read(move |conn| Ok(User::active_ordered(conn)?.iter().map(|user| user_view(&secrets, user)).collect())).await
 }

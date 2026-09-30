@@ -156,6 +156,18 @@ async fn unknown_and_unported_routes() {
     assert_eq!(settings.status, StatusCode::INTERNAL_SERVER_ERROR);
 }
 
+#[test]
+fn database_errors_answer_as_active_record_rescues_them() {
+    assert_eq!(db_error(campfire_db::Error::RecordNotFound("Room")).status(), StatusCode::NOT_FOUND);
+    assert_eq!(db_error(campfire_db::Error::WriterGone).status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let mut errors = campfire_db::Errors::default();
+    errors.add("endpoint", "must use HTTPS");
+    let invalid = db_error(errors.into_result().unwrap_err());
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(format!("{invalid:#}"), "422 Unprocessable Entity: Validation failed: Endpoint must use HTTPS");
+}
+
 /// An action behind `ApplicationController`'s chain that answers with `Current.user`.
 async fn whoami(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
@@ -350,7 +362,7 @@ async fn jobs_run_ad_hoc_work_and_purge_unattached_blobs() {
         .write(move |tx| {
             storage
                 .create_and_upload(tx.conn(), b"hello", campfire_storage::Filename::new("hello.txt"), None, now)
-                .map_err(|e| campfire_db::Error::Other(e.to_string()))
+                .map_err(campfire_db::Error::other)
         })
         .await
         .unwrap();

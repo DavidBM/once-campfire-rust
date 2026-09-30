@@ -20,16 +20,19 @@ async fn app() -> (Booted, tempfile::TempDir) {
 }
 
 /// A handler that reports each event it performs, after `gate` lets it through (when given).
-fn reporting(performed: UnboundedSender<Event>, gate: Option<Arc<Notify>>) -> impl Handler {
+fn reporting(
+    performed: UnboundedSender<Event>,
+    gate: Option<Arc<Notify>>,
+) -> impl Fn(App, Event) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync + 'static {
     move |_app: App, event: Event| {
         let (performed, gate) = (performed.clone(), gate.clone());
-        async move {
+        Box::pin(async move {
             if let Some(gate) = gate {
                 gate.notified().await;
             }
             let _ = performed.send(event);
             Ok(())
-        }
+        })
     }
 }
 
@@ -120,6 +123,29 @@ async fn a_panicking_job_is_logged_and_its_worker_carries_on() {
 
     let logs = logs.text();
     assert!(logs.contains("job panicked job=\"Exploding\" panic=\"kaboom\""), "{logs}");
+}
+
+#[tokio::test]
+async fn a_failed_job_is_logged_with_its_cause() {
+    let (booted, _dir) = app().await;
+    let (logs, _guard) = Logs::capture();
+    let (jobs, queue) = Jobs::new(QUEUE_CAPACITY);
+    let runner = start(queue, booted.app.clone(), Registry::default(), 1);
+
+    let (done, finished) = tokio::sync::oneshot::channel();
+    jobs.perform_later("Failing", async {
+        let cause = campfire_db::Error::other(std::io::Error::other("disk full"));
+        Err(anyhow::Error::new(cause).context("purging the blob"))
+    });
+    jobs.perform_later("After", async move {
+        let _ = done.send(());
+        Ok(())
+    });
+    tokio::time::timeout(Duration::from_secs(5), finished).await.unwrap().unwrap();
+    runner.shutdown(Duration::from_secs(5)).await;
+
+    let logs = logs.text();
+    assert!(logs.contains("job failed job=\"Failing\" error=purging the blob: disk full"), "{logs}");
 }
 
 #[tokio::test]

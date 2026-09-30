@@ -13,19 +13,18 @@ use crate::integrations::web_push;
 pub async fn create(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     let user_id = concerns::require_current_user(c)?.id;
-    // `Current.user.push_subscriptions.find(params[:push_subscription_id])`
     let id = c.param_str("push_subscription_id").and_then(cast_integer).ok_or(Error::NotFound)?;
     let (subscription, badge) = c
         .app()
-        .db
-        .read(move |conn| match PushSubscription::find(conn, id) {
-            Ok(subscription) if subscription.user_id == user_id => Ok(Some((subscription, Membership::unread_count(conn, user_id)?))),
-            Ok(_) | Err(campfire_db::Error::RecordNotFound(_)) => Ok(None),
-            Err(error) => Err(error),
+        .read(move |conn| {
+            // `Current.user.push_subscriptions.find(params[:push_subscription_id])`
+            let subscription = PushSubscription::find(conn, id)?;
+            if subscription.user_id != user_id {
+                return Err(campfire_db::Error::RecordNotFound("Push::Subscription"));
+            }
+            Ok((subscription, Membership::unread_count(conn, user_id)?))
         })
-        .await
-        .map_err(Error::internal)?
-        .ok_or(Error::NotFound)?;
+        .await?;
 
     let location = c.url_for(&campfire_routes::user_push_subscriptions());
     let web_push = c.app().web_push.as_ref().ok_or_else(|| Error::internal(anyhow::anyhow!("Web Push is off (no valid VAPID keys)")))?;

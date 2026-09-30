@@ -3,7 +3,7 @@
 
 use askama::Template;
 use campfire_db::Account;
-use campfire_kit::{Ctx, Error, Result, StatusCode, format};
+use campfire_kit::{Ctx, Result, StatusCode, format};
 use campfire_views::users;
 
 use crate::app::AppCtx;
@@ -19,15 +19,13 @@ pub async fn show(c: &mut Ctx) -> Result {
     let (sidebar, restricted) = {
         let (user, secrets, fragments) = (user.clone(), secrets.clone(), c.app().fragment_cache.clone());
         c.app()
-            .db
             .read(move |conn| {
                 // The direct rooms' fragments come from the store the render then uses.
                 let sidebar = campfire_views::fragment_cache::with(&fragments, || presenters::accounts::sidebar(conn, &secrets, &user))?;
                 let restricted = Account::first(conn)?.is_some_and(|account| account.settings().restrict_room_creation_to_administrators());
                 Ok((sidebar, restricted))
             })
-            .await
-            .map_err(Error::internal)?
+            .await?
     };
 
     let data = SidebarData {

@@ -16,10 +16,11 @@
 use std::sync::Arc;
 
 use campfire_db::{CachedStatements, Connection, Event, Tx};
-use campfire_kit::{Error, Param, Result, UploadedFile};
+use campfire_kit::{Param, Result, UploadedFile};
 use campfire_storage::{Blob, Filename, Staged, Variation};
+use rusqlite::OptionalExtension;
 
-use crate::active_storage::{analyzed_metadata, keep_after_commit, stage_file};
+use crate::active_storage::{analyzed_metadata, keep_after_commit, stage_file, storage_error};
 use crate::app::App;
 
 /// An uploaded file (`ActionDispatch::Http::UploadedFile`), still in its multipart tempfile.
@@ -102,7 +103,7 @@ pub fn assign(tx: &mut Tx<'_>, record: Record, name: &str, assignment: Assignmen
             Ok(None)
         }
         Assignment::Create(staged) => attach(tx, record, name, staged).map(Some),
-        Assignment::Invalid => Err(campfire_db::Error::Other("Could not find or build blob: expected attachable".into())),
+        Assignment::Invalid => Err(campfire_db::Error::other("Could not find or build blob: expected attachable")),
     }
 }
 
@@ -146,8 +147,7 @@ pub fn destroy(tx: &mut Tx<'_>, record: Record, name: &str) -> campfire_db::Resu
             rusqlite::params![record.record_type, record.id, name],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map(Some)
-        .or_else(|error| if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) })?;
+        .optional()?;
     let Some((attachment_id, blob_id)) = attachment else { return Ok(false) };
     tx.conn().execute_cached("DELETE FROM active_storage_attachments WHERE id = ?1", [attachment_id])?;
     super::accounts::touch(tx.conn(), record.table, record.id, tx.now())?;
@@ -196,11 +196,7 @@ fn table_for(record_type: &str) -> Option<&'static str> {
 /// blob, or `None` when there's no attachment or it can't be transformed.
 pub async fn processed_variant(app: &App, record: Record, name: &str, transformations: Variation) -> Result<Option<Blob>> {
     let name = name.to_string();
-    let blob = app.db.read(move |conn| attached_blob(conn, record.record_type, record.id, &name)).await.map_err(Error::internal)?;
+    let blob = app.read(move |conn| attached_blob(conn, record.record_type, record.id, &name)).await?;
     let Some(blob) = blob.filter(Blob::is_variable) else { return Ok(None) };
     crate::active_storage::processed_representation(app, blob, transformations).await.map(Some)
-}
-
-pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
-    campfire_db::Error::Other(error.to_string())
 }
