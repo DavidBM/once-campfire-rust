@@ -43,7 +43,6 @@ pub fn parse(user_agent: &str) -> Agent {
 pub struct Version {
     string: String,
     blank: bool,
-    sequences: Vec<Segment>,
     comparable: bool,
 }
 
@@ -73,16 +72,7 @@ impl Version {
         let blank = string.chars().all(is_ruby_space);
         let digits = string.chars().take_while(char::is_ascii_digit).count();
         let comparable = !blank && digits > 0 && (digits == string.len() || string[digits..].starts_with('.'));
-
-        let sequences = if blank {
-            Vec::new()
-        } else if comparable {
-            scan_sequences(string)
-        } else {
-            vec![Segment::Str(string.to_string())]
-        };
-
-        Version { string: string.to_string(), blank, sequences, comparable }
+        Version { string: string.to_string(), blank, comparable }
     }
 
     /// `Version#nil?`: the string is empty or whitespace.
@@ -99,18 +89,26 @@ impl Version {
         &self.string
     }
 
-    /// `Version#to_a`.
-    pub fn to_a(&self) -> &[Segment] {
-        &self.sequences
+    /// `Version#to_a`, split out when asked for rather than in `new`: a parse makes a version for
+    /// every product, and only comparisons read the segments.
+    pub fn to_a(&self) -> Vec<Segment> {
+        if self.blank {
+            Vec::new()
+        } else if self.comparable {
+            scan_sequences(&self.string)
+        } else {
+            vec![Segment::Str(self.string.clone())]
+        }
     }
 
     /// `Version#<=>` against another version: only the first six segments count.
     pub fn ruby_cmp(&self, other: &Version) -> Ordering {
         if self.comparable {
+            let (ours, theirs) = (self.to_a(), other.to_a());
             let zero = Segment::Int("0".into());
             for i in 0..6 {
-                let a = self.sequences.get(i).unwrap_or(&zero);
-                let b = other.sequences.get(i).unwrap_or(&zero);
+                let a = ours.get(i).unwrap_or(&zero);
+                let b = theirs.get(i).unwrap_or(&zero);
                 match (a, b) {
                     (Segment::Str(_), Segment::Int(_)) => return Ordering::Less,
                     (Segment::Int(_), Segment::Str(_)) => return Ordering::Greater,
@@ -808,8 +806,8 @@ impl Agent {
 
     fn windows_media_player_os(&self) -> Rb<&'static str> {
         let major = self.windows_media_player_major()?;
-        let version = self.base_version().unwrap_or_default();
-        let part = |i: usize| version.to_a().get(i).and_then(Segment::as_u64);
+        let segments = self.base_version().unwrap_or_default().to_a();
+        let part = |i: usize| segments.get(i).and_then(Segment::as_u64);
 
         Ok(if major <= 4 {
             match part(3) {
