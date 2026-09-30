@@ -285,11 +285,9 @@ fn send_blob_stream(c: &mut Ctx, blob: &Blob, disposition: Option<&str>) -> Resu
     Ok(with_disposition(response, disposition, blob))
 }
 
-/// `send_data`/`send_stream`'s `Content-Disposition` for the blob's sanitized filename, built by
-/// campfire_storage, whose `I18n.transliterate` has the whole approximations table (kit's own
-/// covers Latin-1 only).
+/// `send_data`/`send_stream`'s `Content-Disposition` for the blob's sanitized filename.
 fn with_disposition(response: Response, disposition: &str, blob: &Blob) -> Response {
-    response.header(header::CONTENT_DISPOSITION, &campfire_storage::disposition::format(disposition, &blob.filename.sanitized()))
+    response.header(header::CONTENT_DISPOSITION, &rails_compat::content_disposition::format(disposition, &blob.filename.sanitized()))
 }
 
 /// `send_blob_byte_range_data(blob, range_header)`

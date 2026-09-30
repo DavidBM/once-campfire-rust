@@ -3,7 +3,8 @@
 #
 #   docker build -t campfire-reference reference
 #   reference-tools/storage/run.sh            # → vectors/storage.json + vectors/storage/
-#   reference-tools/storage/run.sh tables     # → crates/storage/src/tables.rs
+#   reference-tools/storage/run.sh tables     # → crates/storage/src/tables.rs and
+#                                             #   crates/rails_compat/src/content_disposition/approximations.rs
 #
 # The byte-identity vectors (variants, previews) depend on the image's libvips and ffmpeg; the
 # versions are recorded in storage.json under "versions".
@@ -13,8 +14,11 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 image="${IMAGE:-campfire-reference}"
 
 if [[ "${1:-}" == "tables" ]]; then
-  docker run --rm -v "$root/reference-tools/storage:/tools:ro" "$image" \
-    bundle exec ruby /tools/dump_tables.rb > "$root/crates/storage/src/tables.rs"
+  dump() {
+    docker run --rm -v "$root/reference-tools/storage:/tools:ro" "$image" bundle exec ruby /tools/dump_tables.rb "$1"
+  }
+  dump marcel > "$root/crates/storage/src/tables.rs"
+  dump approximations > "$root/crates/rails_compat/src/content_disposition/approximations.rs"
   exit
 fi
 

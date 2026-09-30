@@ -120,68 +120,9 @@ pub(crate) fn set_header_value(headers: &mut HeaderMap, name: HeaderName, value:
     }
 }
 
-/// `Content-Disposition` as `ActionDispatch::Http::ContentDisposition.format` builds it.
-pub fn content_disposition(disposition: &str, filename: Option<&str>) -> String {
-    match filename {
-        Some(filename) => format!(
-            "{disposition}; filename=\"{}\"; filename*=UTF-8''{}",
-            percent_escape(&transliterate(filename), |b| { b == b' ' || b.is_ascii_alphanumeric() || b"!#$+.^_`|~-".contains(&b) }),
-            percent_escape(filename, |b| b.is_ascii_alphanumeric() || b"!#$&+.^_`|~-".contains(&b)),
-        ),
-        None => disposition.to_string(),
-    }
-}
-
-fn percent_escape(s: &str, keep: impl Fn(u8) -> bool) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        if keep(byte) {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
-/// `I18n.transliterate` for Latin-1: its letters lose their accents, and anything else non-ASCII
-/// becomes `?`. I18n's own table covers more (`Ł` is `L`); Active Storage downloads, whose
-/// filenames come from users, use campfire_storage's copy of it instead.
-fn transliterate(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii() {
-                return c.to_string();
-            }
-            let base = match c {
-                'À'..='Å' => "A",
-                'Æ' => "AE",
-                'Ç' => "C",
-                'È'..='Ë' => "E",
-                'Ì'..='Ï' => "I",
-                'Ð' => "D",
-                'Ñ' => "N",
-                'Ò'..='Ö' | 'Ø' => "O",
-                'Ù'..='Ü' => "U",
-                'Ý' => "Y",
-                'Þ' => "Th",
-                'ß' => "ss",
-                'à'..='å' => "a",
-                'æ' => "ae",
-                'ç' => "c",
-                'è'..='ë' => "e",
-                'ì'..='ï' => "i",
-                'ð' => "d",
-                'ñ' => "n",
-                'ò'..='ö' | 'ø' => "o",
-                'ù'..='ü' => "u",
-                'ý' | 'ÿ' => "y",
-                'þ' => "th",
-                _ => "?",
-            };
-            base.to_string()
-        })
-        .collect()
+/// `Content-Disposition` as `ActionDispatch::Http::ContentDisposition#to_s` builds it.
+fn content_disposition(disposition: &str, filename: Option<&str>) -> String {
+    filename.map_or_else(|| disposition.to_string(), |filename| rails_compat::content_disposition::format(disposition, filename))
 }
 
 /// Options for `send_file` / `send_data`.
@@ -419,6 +360,11 @@ mod tests {
         assert_eq!(
             content_disposition("inline", Some("日本\"x\".txt")),
             "inline; filename=\"%3F%3F%22x%22.txt\"; filename*=UTF-8''%E6%97%A5%E6%9C%AC%22x%22.txt"
+        );
+        // I18n's whole table, not just Latin-1 letters.
+        assert_eq!(
+            content_disposition("attachment", Some("Łódź ×.pdf")),
+            "attachment; filename=\"Lodz x.pdf\"; filename*=UTF-8''%C5%81%C3%B3d%C5%BA%20%C3%97.pdf"
         );
     }
 
