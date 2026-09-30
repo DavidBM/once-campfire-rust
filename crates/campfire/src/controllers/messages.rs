@@ -239,10 +239,13 @@ pub(crate) async fn create_message(c: &Ctx, room: &Room, attributes: MessagePara
             Ok((message, blob))
         })
         .await?;
-    if let Some(blob) = blob {
-        process_attachment(c.app(), blob).await?;
-    }
+    // Without an attachment, `message` is the row as stored: nothing after the commit writes to it,
+    // and Rails answers with the same record (`create!(attributes).tap(&:process_attachment)`,
+    // reference/app/models/message/attachment.rb). Analyzing an attachment touches the message, so
+    // then it's read back.
+    let Some(blob) = blob else { return Ok(message) };
     let id = message.id;
+    process_attachment(c.app(), blob).await?;
     c.app().read(move |conn| Message::find(conn, id)).await
 }
 
