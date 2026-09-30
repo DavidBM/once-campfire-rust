@@ -1,14 +1,14 @@
 //! `reference/app/models/message.rb` and `message/*.rb` (Attachment, Mentionee, Pagination,
 //! Searchable; Broadcasts belong to the app).
 
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 
 use crate::database::Tx;
 use crate::error::{OptionalExt, Result};
 use crate::events::Event;
 use crate::models::{Attachment, Blob, Boost, RichTextRecord, Room, Sound, User};
 use crate::rich_text::RichText;
-use crate::sql::{self, CachedStatements, placeholders, query_all, query_one};
+use crate::sql::{self, CachedStatements, columns, placeholders, query_all, query_one};
 use crate::time::Timestamp;
 
 /// `Message::Pagination::PAGE_SIZE`
@@ -24,6 +24,17 @@ pub struct Message {
     pub client_message_id: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+}
+
+columns! {
+    Message, "messages", message_columns {
+        id: "id",
+        room_id: "room_id",
+        creator_id: "creator_id",
+        client_message_id: "client_message_id",
+        created_at: "created_at",
+        updated_at: "updated_at",
+    }
 }
 
 /// Attributes for `room.messages.create!` / `create_with_attachment!`.
@@ -56,33 +67,36 @@ impl ContentType {
     }
 }
 
-const SELECT_IN_ROOM: &str = r#"SELECT "messages".* FROM "messages" WHERE "messages"."room_id" = ?"#;
+const SELECT_IN_ROOM: &str = concat!("SELECT ", message_columns!(), r#" FROM "messages" WHERE "messages"."room_id" = ?"#);
 
-const SELECT_REACHABLE: &str = r#"SELECT "messages".* FROM "messages" INNER JOIN "rooms" ON "messages"."room_id" = "rooms"."id" INNER JOIN "memberships" ON "rooms"."id" = "memberships"."room_id""#;
+const SELECT_REACHABLE: &str = concat!(
+    "SELECT ",
+    message_columns!(),
+    r#" FROM "messages" INNER JOIN "rooms" ON "messages"."room_id" = "rooms"."id" INNER JOIN "memberships" ON "rooms"."id" = "memberships"."room_id""#
+);
 
 impl Message {
-    pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            room_id: row.get("room_id")?,
-            creator_id: row.get("creator_id")?,
-            client_message_id: row.get("client_message_id")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
-    }
-
     pub fn find(conn: &Connection, id: i64) -> Result<Self> {
         Self::find_by_id(conn, id)?.or_not_found("Message")
     }
 
     pub fn find_by_id(conn: &Connection, id: i64) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "messages" WHERE "messages"."id" = ? LIMIT 1"#, [id], Self::from_row)
+        query_one(
+            conn,
+            concat!("SELECT ", message_columns!(), r#" FROM "messages" WHERE "messages"."id" = ? LIMIT 1"#),
+            [id],
+            Self::from_row,
+        )
     }
 
     /// `Message.last`
     pub fn last(conn: &Connection) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "messages" ORDER BY "messages"."id" DESC LIMIT 1"#, [], Self::from_row)
+        query_one(
+            conn,
+            concat!("SELECT ", message_columns!(), r#" FROM "messages" ORDER BY "messages"."id" DESC LIMIT 1"#),
+            [],
+            Self::from_row,
+        )
     }
 
     pub fn count(conn: &Connection) -> Result<i64> {
@@ -91,7 +105,12 @@ impl Message {
 
     /// `user.messages`
     pub fn by_creator(conn: &Connection, creator_id: i64) -> Result<Vec<Self>> {
-        query_all(conn, r#"SELECT "messages".* FROM "messages" WHERE "messages"."creator_id" = ?"#, [creator_id], Self::from_row)
+        query_all(
+            conn,
+            concat!("SELECT ", message_columns!(), r#" FROM "messages" WHERE "messages"."creator_id" = ?"#),
+            [creator_id],
+            Self::from_row,
+        )
     }
 
     /// `room.messages`
@@ -204,7 +223,11 @@ impl Message {
         }
         query_all(
             conn,
-            r#"SELECT "messages".* FROM "messages" join message_search_index idx on messages.id = idx.rowid WHERE "messages"."room_id" = ? AND (idx.body match ?) ORDER BY "messages"."created_at" ASC"#,
+            concat!(
+                "SELECT ",
+                message_columns!(),
+                r#" FROM "messages" join message_search_index idx on messages.id = idx.rowid WHERE "messages"."room_id" = ? AND (idx.body match ?) ORDER BY "messages"."created_at" ASC"#
+            ),
             params![room_id, query],
             Self::from_row,
         )
