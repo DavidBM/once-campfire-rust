@@ -67,15 +67,29 @@ fn representation_path(kind: &str, verifier: &dyn Verifier, blob: &Blob, variati
     )
 }
 
-/// `CGI.escape` as `Hash#to_query` applies it.
+/// `CGI.escape` as `Hash#to_query` applies it: everything but `a-zA-Z0-9_.-~` is escaped, and a
+/// space is `+`.
 fn query_escape(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
             b' ' => out.push('+'),
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => out.push(b as char),
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => out.push(b as char),
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_escape_is_cgi_escape() {
+        // `CGI.escape("a*~ b-._")` in the reference; `rails_service_blob_path(..., disposition:
+        // "a*~ b")` ends in `?disposition=a%2A~+b`.
+        assert_eq!(query_escape("a*~ b-._"), "a%2A~+b-._");
+        assert_eq!(query_escape("attachment"), "attachment");
+    }
 }
