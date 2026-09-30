@@ -9,7 +9,7 @@ use rails_compat::clock::SystemClock;
 use rusqlite::{Row, params};
 
 use crate::fixtures;
-use crate::{Connection, Membership, Message, Room, Timestamp, query_all, schema};
+use crate::{Connection, Membership, Message, Room, RoomType, Timestamp, query_all, schema};
 
 /// Where a database's tables got their column order.
 #[derive(Debug, Clone, Copy)]
@@ -26,6 +26,7 @@ const LAYOUTS: [Layout; 2] = [Layout::Schema, Layout::Migrated];
 #[rustfmt::skip]
 const MIGRATED_COLUMNS: &[(&str, &[&str])] = &[
     ("messages", &["id", "room_id", "creator_id", "created_at", "updated_at", "client_message_id"]),
+    ("rooms", &["id", "name", "created_at", "updated_at", "type", "creator_id"]),
 ];
 
 fn database(layout: Layout) -> Connection {
@@ -105,7 +106,7 @@ fn distinct_room() -> Room {
     Room {
         id: 2001,
         name: Some("Room 2002".into()),
-        room_type: crate::RoomType::Closed,
+        room_type: RoomType::Closed,
         creator_id: 2003,
         created_at: at(2004),
         updated_at: at(2005),
@@ -159,6 +160,60 @@ fn messages_read_by_position_as_by_name() {
             let mut in_room = Message::for_room(&conn, message.room_id).unwrap();
             in_room.sort_by_key(|m| m.id);
             assert_eq!(in_room, messages.iter().filter(|m| m.room_id == message.room_id).cloned().collect::<Vec<_>>(), "{layout:?}");
+        }
+    }
+}
+
+// Rooms
+
+/// How `Room::from_row` read a row before it read by position.
+fn room_by_name(row: &Row<'_>) -> rusqlite::Result<Room> {
+    Ok(Room {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        room_type: row.get("type")?,
+        creator_id: row.get("creator_id")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+#[test]
+fn a_room_reads_each_column_into_its_own_field() {
+    for layout in LAYOUTS {
+        let conn = database(layout);
+        let room = distinct_room();
+        let unnamed =
+            Room { id: 2011, name: None, room_type: RoomType::Direct, creator_id: 2013, created_at: at(2014), updated_at: at(2015) };
+        insert_room(&conn, &room);
+        insert_room(&conn, &unnamed);
+
+        assert_eq!(Room::find(&conn, room.id).unwrap(), room, "{layout:?}");
+        assert_eq!(Room::find(&conn, unnamed.id).unwrap(), unnamed, "{layout:?}");
+        assert_eq!(Room::all(&conn).unwrap(), [room, unnamed], "{layout:?}");
+    }
+}
+
+#[test]
+fn rooms_read_by_position_as_by_name() {
+    for layout in LAYOUTS {
+        let conn = database_with_fixtures(layout);
+        let rooms = query_all(&conn, r#"SELECT * FROM "rooms" ORDER BY "id""#, [], room_by_name).unwrap();
+        assert!(rooms.len() > 3);
+        for room in &rooms {
+            assert_eq!(&Room::find(&conn, room.id).unwrap(), room, "{layout:?}");
+        }
+        for user_id in query_all(&conn, r#"SELECT "id" FROM "users""#, [], |row| row.get::<_, i64>(0)).unwrap() {
+            let mut for_user = Room::for_user(&conn, user_id).unwrap();
+            for_user.sort_by_key(|room| room.id);
+            let by_name = query_all(
+                &conn,
+                r#"SELECT "rooms".* FROM "rooms" INNER JOIN "memberships" ON "rooms"."id" = "memberships"."room_id" WHERE "memberships"."user_id" = ? ORDER BY "rooms"."id""#,
+                [user_id],
+                room_by_name,
+            )
+            .unwrap();
+            assert_eq!(for_user, by_name, "{layout:?}");
         }
     }
 }
