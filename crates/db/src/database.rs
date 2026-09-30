@@ -50,7 +50,12 @@ pub struct Env {
 
 impl Default for Env {
     fn default() -> Self {
-        Self { clock: Arc::new(SystemClock), sink: Arc::new(NullSink), rich_text: Arc::new(BasicRichText), bcrypt_cost: 12 }
+        Self {
+            clock: Arc::new(SystemClock),
+            sink: Arc::new(NullSink),
+            rich_text: Arc::new(BasicRichText),
+            bcrypt_cost: rails_compat::password::COST,
+        }
     }
 }
 

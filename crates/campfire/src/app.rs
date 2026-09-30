@@ -128,7 +128,8 @@ async fn open_database(config: &Config, clock: SharedClock, jobs: jobs::Jobs, ri
     let mut db_config = campfire_db::Config::new(&config.storage.database);
     db_config.readers = config.db_readers;
     db_config.environment = config.environment.clone();
-    let env = campfire_db::Env { clock: Arc::new(DbClock(clock)), sink: Arc::new(jobs), rich_text, bcrypt_cost: 12 };
+    let env =
+        campfire_db::Env { clock: Arc::new(DbClock(clock)), sink: Arc::new(jobs), rich_text, bcrypt_cost: rails_compat::password::COST };
     Ok(tokio::task::spawn_blocking(move || Database::open(db_config, env)).await??)
 }
 

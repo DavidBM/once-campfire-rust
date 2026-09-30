@@ -411,7 +411,6 @@ name = "campfire_db"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "bcrypt",
  "campfire_db",
  "crc32fast",
  "hex",

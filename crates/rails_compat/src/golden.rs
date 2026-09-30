@@ -269,8 +269,9 @@ fn passwords() {
         }
     });
     assert!(password::verify("secret123456", str(v("passwords.seeded_user_digest"))));
-    let ours = password::digest_with_cost("pässwörd ☃", password::MIN_COST);
+    let ours = password::digest_with_cost("pässwörd ☃", password::MIN_COST).unwrap();
     assert!(ours.starts_with("$2a$04$") && password::verify("pässwörd ☃", &ours));
+    assert!(password::digest_with_cost("secret", password::MIN_COST - 1).is_err());
     assert!(!password::verify("anything", "not a digest"));
 }
 
@@ -323,7 +324,7 @@ fn write_rust_output_for_rails_to_verify() {
     let passwords: Vec<Value> =
         [("secret123456", password::COST), ("pässwörd ☃", password::MIN_COST), (&"a".repeat(80), password::MIN_COST)]
             .iter()
-            .map(|(pw, cost)| json!({ "password": pw, "digest": password::digest_with_cost(pw, *cost) }))
+            .map(|(pw, cost)| json!({ "password": pw, "digest": password::digest_with_cost(pw, *cost).unwrap() }))
             .collect();
 
     let app_verifiers: Vec<Value> = [
