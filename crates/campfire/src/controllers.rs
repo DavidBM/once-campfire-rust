@@ -597,13 +597,15 @@ mod tests {
     }
 
     /// A route pattern's paths: with and without the format, and with its params filled in with
-    /// ids, words and percent-escapes.
+    /// ids, words, percent-escapes and raw UTF-8 (which the server passes through unescaped, and
+    /// which the patterns' Unicode classes match as multi-byte sequences).
     fn filled_in(pattern: &str) -> Vec<String> {
         static PARAM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([:*])(\w+)").unwrap());
         let mut paths = Vec::new();
         for format in ["", ".:format"] {
             let pattern = pattern.replace("(.:format)", format);
-            for (param, glob) in [("1", "photo"), ("opens", "dir/photo.tar.gz"), ("caf%C3%A9", "a%2Fb/c%20d")] {
+            for (param, glob) in [("1", "photo"), ("opens", "dir/photo.tar.gz"), ("caf%C3%A9", "a%2Fb/c%20d"), ("café", "😀/dir/é.tar")]
+            {
                 paths.push(
                     PARAM
                         .replace_all(&pattern, |c: &regex::Captures| match (&c[1], &c[2]) {
@@ -619,11 +621,12 @@ mod tests {
     }
 
     /// `path` and its near misses: other formats, trailing and doubled slashes, a character or a
-    /// segment more or less, other case, a query, and escapes that aren't UTF-8.
+    /// segment more or less, other case, a query, escapes that aren't UTF-8, and raw UTF-8.
     fn variants(path: &str) -> Vec<String> {
         let mut variants =
             vec![path.to_string(), path.to_uppercase(), path.replacen('/', "//", 2), path.trim_start_matches('/').to_string()];
-        for suffix in [".json", ".turbo_stream", ".1.2", ".", "/", "//", "x", "/x", "/new", "/edit", "?q=1", "%FF", "%2F"] {
+        for suffix in [".json", ".turbo_stream", ".1.2", ".", "/", "//", "x", "/x", "/new", "/edit", "?q=1", "%FF", "%2F", "é", "😀.json"]
+        {
             variants.push(format!("{path}{suffix}"));
         }
         if let Some((last, _)) = path.char_indices().last() {
