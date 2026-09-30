@@ -77,7 +77,9 @@ impl AppState {
 pub fn db_error(error: campfire_db::Error) -> campfire_kit::Error {
     match error {
         campfire_db::Error::RecordNotFound(_) => campfire_kit::Error::NotFound,
-        campfire_db::Error::RecordInvalid(_) => campfire_kit::Error::Status(campfire_kit::StatusCode::UNPROCESSABLE_ENTITY),
+        invalid @ campfire_db::Error::RecordInvalid(_) => {
+            campfire_kit::Error::with_status(campfire_kit::StatusCode::UNPROCESSABLE_ENTITY, invalid)
+        }
         other => campfire_kit::Error::internal(other),
     }
 }

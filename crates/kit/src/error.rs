@@ -49,6 +49,10 @@ pub enum Error {
     /// Any other status an app wants to map an error to.
     #[error("{0}")]
     Status(StatusCode),
+    /// Like [`Error::Status`], keeping the error that caused it for the log line (see
+    /// [`Error::with_status`]).
+    #[error("{0}: {1:#}")]
+    WithStatus(StatusCode, anyhow::Error),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -62,7 +66,7 @@ impl Error {
             Error::UnknownFormat => StatusCode::NOT_ACCEPTABLE,
             Error::NotFound => StatusCode::NOT_FOUND,
             Error::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-            Error::Status(status) => *status,
+            Error::Status(status) | Error::WithStatus(status, _) => *status,
             Error::CookieOverflow(_) | Error::UnsafeRedirect(_) | Error::IpSpoofAttack | Error::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -71,6 +75,11 @@ impl Error {
 
     pub fn internal(error: impl Into<anyhow::Error>) -> Self {
         Error::Internal(error.into())
+    }
+
+    /// Answer `error` with `status` instead of a 500.
+    pub fn with_status(status: StatusCode, error: impl Into<anyhow::Error>) -> Self {
+        Error::WithStatus(status, error.into())
     }
 }
 
@@ -96,4 +105,18 @@ impl From<std::io::Error> for Error {
 /// ```
 pub fn halt<T>(response: Response) -> Result<T> {
     Err(Error::Halt(Box::new(response)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_status_answers_the_status_and_logs_the_cause() {
+        let cause = anyhow::anyhow!("name can't be blank").context("validation failed");
+        let error = Error::with_status(StatusCode::UNPROCESSABLE_ENTITY, cause);
+
+        assert_eq!(error.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(format!("{error:#}"), "422 Unprocessable Entity: validation failed: name can't be blank");
+    }
 }

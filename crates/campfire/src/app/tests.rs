@@ -156,6 +156,18 @@ async fn unknown_and_unported_routes() {
     assert_eq!(settings.status, StatusCode::INTERNAL_SERVER_ERROR);
 }
 
+#[test]
+fn database_errors_answer_as_active_record_rescues_them() {
+    assert_eq!(db_error(campfire_db::Error::RecordNotFound("Room")).status(), StatusCode::NOT_FOUND);
+    assert_eq!(db_error(campfire_db::Error::WriterGone).status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let mut errors = campfire_db::Errors::default();
+    errors.add("endpoint", "must use HTTPS");
+    let invalid = db_error(errors.into_result().unwrap_err());
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(format!("{invalid:#}"), "422 Unprocessable Entity: Validation failed: Endpoint must use HTTPS");
+}
+
 /// An action behind `ApplicationController`'s chain that answers with `Current.user`.
 async fn whoami(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
