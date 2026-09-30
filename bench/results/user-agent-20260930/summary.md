@@ -94,5 +94,25 @@ The raw `cpu_ms_per_req` in the per-run JSON has four decimals.
 
 ## HTTP A/B
 
-To be added by the coordinator. The load generator now takes `--user-agent`, and so do
-`bench/attrib`, `bench/run` and `bench/profile`.
+main at `0dbd10d` (the same code as `d93d3dd`) against `53b4339`: native release builds,
+interleaved over 5 reps, 5 s per cell. It ran as two `bench/attrib` runs from this branch:
+- with `--user-agent` set to a desktop Chrome 140 on Windows, over room_show and post_message
+  ([`http-ua/`](http-ua/))
+- without a User-Agent, over room_show ([`http-no-ua/`](http-no-ua/))
+
+The host's load average was 6–14. Medians:
+
+| Route | User-Agent | Clients | main req/s | branch req/s | main CPU µs/req | branch CPU µs/req |
+|---|---|---|---|---|---|---|
+| room_show | Chrome UA | 1 | 4,355 | 4,327 (0.99×) | 222.7 | 220.9 (-1.8) |
+| room_show | Chrome UA | 16 | 18,013 | 17,970 (1.00×) | 210.8 | 206.4 (-4.4) |
+| post_message | Chrome UA | 1 | 1,921 | 1,920 (1.00×) | 559.0 | 545.0 (-14.0) |
+| post_message | Chrome UA | 16 | 4,882 | 5,033 (1.03×) | 546.0 | 559.6 (+13.6) |
+| room_show | no UA | 1 | 4,652 | 4,641 (1.00×) | 207.6 | 207.5 (-0.1) |
+| room_show | no UA | 16 | 19,113 | 19,188 (1.00×) | 198.4 | 197.6 (-0.8) |
+
+With a browser's User-Agent, room_show uses 2–4 µs less CPU per request, about the 2 µs the
+in-process timing predicted. Without one, it's within 1 µs, against about 0.6 µs predicted. Both are
+1–2% of a page, inside this host's noise for req/s. post_message moves by ±14 µs in both directions
+between the two client counts, which is noise too: its User-Agent work is only allow_browser's
+check.
