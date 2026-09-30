@@ -4,6 +4,7 @@
 
 use campfire_db::{Account, Boost, Membership, Message, Room};
 use campfire_kit::{Ctx, Format, Result, StatusCode};
+use campfire_views::fragment_cache::Fragment;
 use campfire_views::helpers as h;
 use campfire_views::layouts::{Application, FrameLayout};
 use campfire_views::{Platform, ViewContext};
@@ -123,17 +124,17 @@ pub fn render_detached_at<T>(app: &App, account: Option<&Account>, base_url: &st
 /// handed to `channels::Broadcasts`.
 #[derive(Default)]
 pub struct Rendered {
-    pub message: Option<String>,
+    pub message: Option<Fragment>,
     pub message_presentation: Option<String>,
-    pub boost: Option<String>,
+    pub boost: Option<Fragment>,
     pub shared_room: Option<String>,
     /// `users/sidebars/rooms/_direct`, per membership id.
-    pub direct_rooms: Vec<(i64, String)>,
+    pub direct_rooms: Vec<(i64, Fragment)>,
 }
 
 impl Partials for Rendered {
     fn message(&self, _: &Message) -> String {
-        self.message.clone().unwrap_or_default()
+        self.message.as_deref().cloned().unwrap_or_default()
     }
 
     fn message_presentation(&self, _: &Message) -> String {
@@ -141,7 +142,7 @@ impl Partials for Rendered {
     }
 
     fn boost(&self, _: &Boost) -> String {
-        self.boost.clone().unwrap_or_default()
+        self.boost.as_deref().cloned().unwrap_or_default()
     }
 
     fn shared_room(&self, _: &Room) -> String {
@@ -149,7 +150,7 @@ impl Partials for Rendered {
     }
 
     fn direct_room(&self, membership: &Membership) -> String {
-        self.direct_rooms.iter().find(|(id, _)| *id == membership.id).map(|(_, html)| html.clone()).unwrap_or_default()
+        self.direct_rooms.iter().find(|(id, _)| *id == membership.id).map(|(_, html)| String::clone(html)).unwrap_or_default()
     }
 }
 
