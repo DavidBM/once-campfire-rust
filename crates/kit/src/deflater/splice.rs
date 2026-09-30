@@ -184,9 +184,10 @@ impl PageParts {
     fn pieces(&self, body: &[u8]) -> Vec<Bytes> {
         let befores: Vec<(Before, &[u8])> =
             std::iter::once((Before::Nothing, &b""[..])).chain(self.parts.iter().map(|part| part.as_before(body))).collect();
-        let mut pieces: Vec<Option<Bytes>> = {
+        // Only look up under the locks; compressing happens outside them.
+        let stored: Vec<Option<Bytes>> = {
             let fragments = lock(&FRAGMENTS);
-            let texts = &mut lock(&TEXT_PIECES);
+            let mut texts = lock(&TEXT_PIECES);
             self.parts
                 .iter()
                 .zip(&befores)
@@ -199,10 +200,12 @@ impl PageParts {
                 })
                 .collect()
         };
+        let mut pieces = Vec::with_capacity(self.parts.len());
         let mut new_texts = Vec::new();
         let mut new_fragments = Vec::new();
-        for (index, ((part, (before, dictionary)), piece)) in self.parts.iter().zip(&befores).zip(&mut pieces).enumerate() {
-            if piece.is_some() {
+        for (index, ((part, (before, dictionary)), stored)) in self.parts.iter().zip(&befores).zip(stored).enumerate() {
+            if let Some(piece) = stored {
+                pieces.push(piece);
                 continue;
             }
             let deflated = compress(dictionary, &body[part.range().clone()]);
@@ -222,7 +225,7 @@ impl PageParts {
                     },
                 )),
             }
-            *piece = Some(deflated);
+            pieces.push(deflated);
         }
         if !new_texts.is_empty() {
             let mut texts = lock(&TEXT_PIECES);
@@ -238,7 +241,7 @@ impl PageParts {
                 }
             }
         }
-        pieces.into_iter().map(|piece| piece.expect("every part has a piece")).collect()
+        pieces
     }
 }
 
