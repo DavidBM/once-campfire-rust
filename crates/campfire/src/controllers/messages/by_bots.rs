@@ -12,7 +12,6 @@ use super::{
 };
 use crate::app::AppCtx;
 use crate::concerns::{self, Before, before_actions, cast_integer, require_current_user};
-use crate::controllers::presenters::page::db_error;
 
 fn before() -> Before {
     Before::default().allow_bot_access()
@@ -78,7 +77,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 async fn set_room(c: &mut Ctx) -> Result<Room> {
     let user_id = require_current_user(c)?.id;
     let room = match c.param_str("room_id").and_then(cast_integer) {
-        Some(id) => c.app().db.read(move |conn| Room::find_for_user(conn, user_id, id)).await.map_err(db_error)?,
+        Some(id) => c.app().read(move |conn| Room::find_for_user(conn, user_id, id)).await?,
         None => None,
     };
     match room {
@@ -122,7 +121,6 @@ async fn set_pagination_headers(c: &mut Ctx, room: &Room, messages: &[Message]) 
     let (room_id, first, last) = (room.id, messages.first().cloned(), messages.last().cloned());
     let (count, next_page) = c
         .app()
-        .db
         .read(move |conn| {
             let count = Message::count_in_room(conn, room_id)?;
             let next_page = match (first, last) {
@@ -132,8 +130,7 @@ async fn set_pagination_headers(c: &mut Ctx, room: &Room, messages: &[Message]) 
             };
             Ok((count, next_page))
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     c.set_header("x-total-count", &count.to_string());
     if let Some((key, id)) = next_page {
         let bot_key = c.param_str("bot_key").unwrap_or_default().to_string();

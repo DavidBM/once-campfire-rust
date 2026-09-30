@@ -69,26 +69,12 @@ impl JobKind {
 }
 
 /// Performs one kind of job.
-#[async_trait::async_trait]
-pub trait Handler: Send + Sync + 'static {
-    async fn perform(&self, app: App, event: Event) -> anyhow::Result<()>;
-}
-
-#[async_trait::async_trait]
-impl<F, Fut> Handler for F
-where
-    F: Fn(App, Event) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-{
-    async fn perform(&self, app: App, event: Event) -> anyhow::Result<()> {
-        self(app, event).await
-    }
-}
+type Handler = Box<dyn Fn(App, Event) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>;
 
 /// Which handler performs which kind of job.
 #[derive(Default)]
 pub struct Registry {
-    handlers: HashMap<JobKind, Arc<dyn Handler>>,
+    handlers: HashMap<JobKind, Handler>,
 }
 
 impl Registry {
@@ -100,12 +86,16 @@ impl Registry {
         registry
     }
 
-    pub fn handle(&mut self, kind: JobKind, handler: impl Handler) {
-        self.handlers.insert(kind, Arc::new(handler));
+    pub fn handle<F, Fut>(&mut self, kind: JobKind, handler: F)
+    where
+        F: Fn(App, Event) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.handlers.insert(kind, Box::new(move |app, event| Box::pin(handler(app, event))));
     }
 
-    fn get(&self, kind: JobKind) -> Option<Arc<dyn Handler>> {
-        self.handlers.get(&kind).cloned()
+    fn get(&self, kind: JobKind) -> Option<&Handler> {
+        self.handlers.get(&kind)
     }
 }
 
@@ -260,14 +250,14 @@ async fn perform(app: App, registry: &Registry, work: Work) {
         match work {
             Work::AdHoc(_, future) => future.await,
             Work::Event(kind, event) => match registry.get(kind) {
-                Some(handler) => handler.perform(app, event).await,
+                Some(handler) => handler(app, event).await,
                 None => Err(anyhow!("no handler registered for {event:?}")),
             },
         }
     };
     match AssertUnwindSafe(job).catch_unwind().await {
         Ok(Ok(())) => tracing::info!(job = name, "performed"),
-        Ok(Err(error)) => tracing::error!(job = name, %error, "job failed"),
+        Ok(Err(error)) => tracing::error!(job = name, error = %format_args!("{error:#}"), "job failed"),
         Err(panic) => tracing::error!(job = name, panic = panic_message(&*panic), "job panicked"),
     }
 }

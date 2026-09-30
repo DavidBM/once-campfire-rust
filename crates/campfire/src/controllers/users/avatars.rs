@@ -52,7 +52,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
     c.use_live_response(); // `include ActiveStorage::Streaming`
     concerns::before_actions(c, Before::default()).await?;
     let user_id = concerns::require_current_user(c)?.id;
-    c.app().db.write(move |tx| attachments::destroy(tx, Record::user(user_id), "avatar")).await.map_err(Error::internal)?;
+    c.app().write(move |tx| attachments::destroy(tx, Record::user(user_id), "avatar")).await?;
     let location = c.url_for(&campfire_routes::user_profile());
     c.redirect_to(&location)
 }
@@ -65,7 +65,7 @@ async fn from_avatar_token(c: &mut Ctx) -> Result<User> {
     let Some(user_id) = presenters::accounts::user_id_from_avatar_token(&c.app().secrets, &token, c.now()) else {
         return halt(c.head(campfire_kit::StatusCode::NOT_FOUND));
     };
-    c.app().db.read(move |conn| User::find_by_id(conn, user_id)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
+    c.app().read(move |conn| User::find_by_id(conn, user_id)).await?.ok_or(Error::NotFound)
 }
 
 /// Whether `lookup_context.find_all("show", ["users/avatars", ...])` finds `show.svg.erb` for the

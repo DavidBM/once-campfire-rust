@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use campfire_db::PushSubscription;
-use campfire_kit::{Ctx, Error, Result, StatusCode, format, halt};
+use campfire_kit::{Ctx, Result, StatusCode, format, halt};
 use campfire_views::sessions;
 use jiff::{SignedDuration, Timestamp};
 
@@ -59,7 +59,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 
 /// `redirect_to first_run_url if User.none?`
 async fn ensure_user_exists(c: &mut Ctx) -> Result<()> {
-    let none = c.app().db.read(presenters::accounts::no_users).await.map_err(Error::internal)?;
+    let none = c.app().read(presenters::accounts::no_users).await?;
     if none {
         let first_run = c.url_for(&campfire_routes::first_run());
         return halt(c.redirect_to(&first_run)?);
@@ -76,7 +76,7 @@ async fn render_rejection(c: &mut Ctx, status: StatusCode) -> Result {
 async fn render_new(c: &mut Ctx, status: StatusCode) -> Result {
     c.respond_to(&[&format::HTML])?;
     let email_address = c.param_str("email_address").map(str::to_string);
-    let help_contact = c.app().db.read(presenters::accounts::help_contact).await.map_err(Error::internal)?;
+    let help_contact = c.app().read(presenters::accounts::help_contact).await?;
     framed_page!(c, status, |ctx| sessions::New { ctx, email_address: email_address.clone(), help_contact: help_contact.clone() }).await
 }
 
@@ -84,7 +84,7 @@ async fn render_new(c: &mut Ctx, status: StatusCode) -> Result {
 async fn remove_push_subscription(c: &mut Ctx) -> Result<()> {
     let Some(endpoint) = c.param_str("push_subscription_endpoint").map(str::to_string) else { return Ok(()) };
     let Some(user_id) = current_user(c).map(|user| user.id) else { return Ok(()) };
-    c.app().db.write(move |tx| PushSubscription::destroy_by_endpoint(tx, user_id, &endpoint)).await.map_err(Error::internal)
+    c.app().write(move |tx| PushSubscription::destroy_by_endpoint(tx, user_id, &endpoint)).await
 }
 
 // --- Rate limiting ---------------------------------------------------------------------------------

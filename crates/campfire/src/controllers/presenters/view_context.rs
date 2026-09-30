@@ -41,7 +41,6 @@ impl Layout {
         let secrets = app.secrets.clone();
         let user = concerns::current_user(c).cloned();
         let (account, has_logo) = app
-            .db
             .read(|conn| {
                 let account = Account::first(conn)?;
                 let has_logo = match &account {
@@ -50,8 +49,7 @@ impl Layout {
                 };
                 Ok((account, has_logo))
             })
-            .await
-            .map_err(Error::internal)?;
+            .await?;
         let last_room_visited_id = if user.is_some() { concerns::last_room_visited(c).await?.map(|room| room.id) } else { None };
 
         Ok(Self {

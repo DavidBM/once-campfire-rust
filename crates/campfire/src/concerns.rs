@@ -184,7 +184,7 @@ pub async fn reject_banned_ip(c: &mut Ctx) -> Result<()> {
         return Ok(());
     }
     let ip = c.request.remote_ip()?.to_string();
-    let banned = c.app().db.read(move |conn| Ban::banned(conn, &ip)).await.map_err(Error::internal)?;
+    let banned = c.app().read(move |conn| Ban::banned(conn, &ip)).await?;
     if banned {
         return halt(head(StatusCode::TOO_MANY_REQUESTS));
     }
@@ -196,7 +196,7 @@ pub async fn reject_banned_ip(c: &mut Ctx) -> Result<()> {
 /// `Authentication::SessionLookup#find_session_by_cookie`
 pub async fn find_session_by_cookie(c: &Ctx) -> Result<Option<Session>> {
     let Some(token) = c.cookies.signed("session_token") else { return Ok(None) };
-    c.app().db.read(move |conn| Session::find_by_token(conn, &token)).await.map_err(Error::internal)
+    c.app().read(move |conn| Session::find_by_token(conn, &token)).await
 }
 
 /// `require_authentication`: `restore_authentication || bot_authentication || request_authentication`.
@@ -225,7 +225,7 @@ pub async fn bot_authentication(c: &mut Ctx) -> Result<bool> {
     let Some(bot_key) = param.as_str().map(|key| ruby_strip(key).to_string()) else {
         return Err(Error::internal(anyhow::anyhow!("undefined method 'strip' for bot_key")));
     };
-    let bot = c.app().db.read(move |conn| User::authenticate_bot(conn, &bot_key)).await.map_err(Error::internal)?;
+    let bot = c.app().read(move |conn| User::authenticate_bot(conn, &bot_key)).await?;
     match bot {
         Some(bot) => {
             c.set_current(CurrentUser(bot));
@@ -267,7 +267,7 @@ pub async fn authenticate_by(c: &Ctx, email_address: String, password: String) -
     if password.is_empty() {
         return Ok(None);
     }
-    let candidate = c.app().db.read(move |conn| User::find_active_by_email_address(conn, &email_address)).await.map_err(Error::internal)?;
+    let candidate = c.app().read(move |conn| User::find_active_by_email_address(conn, &email_address)).await?;
     tokio::task::spawn_blocking(move || User::authenticated(candidate, &password)).await.map_err(Error::internal)
 }
 
@@ -275,8 +275,7 @@ pub async fn authenticate_by(c: &Ctx, email_address: String, password: String) -
 pub async fn start_new_session_for(c: &mut Ctx, user: User) -> Result<Session> {
     let (user_agent, ip) = (c.request.user_agent().map(str::to_string), c.request.remote_ip()?.to_string());
     let user_id = user.id;
-    let session =
-        c.app().db.write(move |tx| Session::start(tx, user_id, user_agent.as_deref(), Some(&ip))).await.map_err(Error::internal)?;
+    let session = c.app().write(move |tx| Session::start(tx, user_id, user_agent.as_deref(), Some(&ip))).await?;
     authenticated_as(c, session.clone(), Some(user), true).await?;
     Ok(session)
 }
@@ -292,14 +291,12 @@ pub async fn resume_session(c: &mut Ctx, session: Session) -> Result<()> {
     let session = if refresh {
         let (user_agent, ip) = (c.request.user_agent().map(str::to_string), c.request.remote_ip()?.to_string());
         c.app()
-            .db
             .write(move |tx| {
                 let mut session = session;
                 session.resume(tx, user_agent.as_deref(), Some(&ip))?;
                 Ok(session)
             })
-            .await
-            .map_err(Error::internal)?
+            .await?
     } else {
         session
     };
@@ -313,7 +310,7 @@ async fn authenticated_as(c: &mut Ctx, session: Session, user: Option<User>, set
         Some(user) => Some(user),
         None => {
             let user_id = session.user_id;
-            c.app().db.read(move |conn| User::find_by_id(conn, user_id)).await.map_err(Error::internal)?
+            c.app().read(move |conn| User::find_by_id(conn, user_id)).await?
         }
     };
     if set_cookie {
@@ -337,7 +334,7 @@ fn set_authentication_cookie(c: &mut Ctx, session: &Session) -> Result<()> {
 /// and disconnect the user's sockets (`reset_remote_connections`, errors only logged).
 pub async fn terminate_current_session(c: &mut Ctx) -> Result<()> {
     if let Some(session) = current_session(c).cloned() {
-        c.app().db.write(move |tx| session.destroy(tx)).await.map_err(Error::internal)?;
+        c.app().write(move |tx| session.destroy(tx)).await?;
     }
     c.reset_session();
     c.cookies.delete("session_token");
@@ -455,7 +452,6 @@ pub async fn last_room_visited(c: &Ctx) -> Result<Option<Room>> {
     // `find_by(id: cookies[:last_room])` casts the cookie like an integer column would.
     let last_room = c.cookies.get("last_room").and_then(cast_integer);
     c.app()
-        .db
         .read(move |conn| {
             if let Some(room_id) = last_room
                 && let Some(room) = Room::find_for_user(conn, user_id, room_id)?
@@ -465,7 +461,6 @@ pub async fn last_room_visited(c: &Ctx) -> Result<Option<Room>> {
             Room::original_for_user(conn, user_id)
         })
         .await
-        .map_err(Error::internal)
 }
 
 // --- RoomScoped ----------------------------------------------------------------------------------
@@ -476,15 +471,17 @@ pub async fn set_room(c: &mut Ctx) -> Result<(Membership, Room)> {
     let user_id = require_current_user(c)?.id;
     let Some(room_id) = c.param_str("room_id").and_then(cast_integer) else { return Err(Error::NotFound) };
     c.app()
-        .db
         .read(move |conn| {
-            let Some(membership) = Membership::find_by_room_and_user(conn, room_id, user_id)? else { return Ok(None) };
-            let room = membership.room(conn)?;
-            Ok(Some((membership, room)))
+            let membership =
+                Membership::find_by_room_and_user(conn, room_id, user_id)?.ok_or(campfire_db::Error::RecordNotFound("Membership"))?;
+            // `@membership.room` is nil when the room is gone (memberships have no foreign key to
+            // rooms), and the action fails on it: a 500, where `Membership#room`'s
+            // `RecordNotFound` would be a 404.
+            let room =
+                Room::find_by_id(conn, membership.room_id)?.ok_or_else(|| campfire_db::Error::other("the membership's room is gone"))?;
+            Ok((membership, room))
         })
         .await
-        .map_err(Error::internal)?
-        .ok_or(Error::NotFound)
 }
 
 // --- Helpers -------------------------------------------------------------------------------------

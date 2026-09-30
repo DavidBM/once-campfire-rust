@@ -1,6 +1,6 @@
 //! `Users::BansController` (reference/app/controllers/users/bans_controller.rb).
 
-use campfire_kit::{Ctx, Error, Result};
+use campfire_kit::{Ctx, Result};
 
 use super::find_user;
 use crate::app::AppCtx;
@@ -12,7 +12,7 @@ pub async fn create(c: &mut Ctx) -> Result {
     concerns::ensure_can_administer(c)?;
     let mut user = find_user(c, "user_id").await?;
     let id = user.id;
-    c.app().db.write(move |tx| user.ban(tx)).await.map_err(Error::internal)?;
+    c.app().write(move |tx| user.ban(tx)).await?;
     redirect_to_user(c, id)
 }
 
@@ -22,7 +22,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
     concerns::ensure_can_administer(c)?;
     let mut user = find_user(c, "user_id").await?;
     let id = user.id;
-    c.app().db.write(move |tx| user.unban(tx)).await.map_err(Error::internal)?;
+    c.app().write(move |tx| user.unban(tx)).await?;
     redirect_to_user(c, id)
 }
 

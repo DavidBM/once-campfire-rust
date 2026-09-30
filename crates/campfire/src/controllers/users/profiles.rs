@@ -2,7 +2,7 @@
 //! signed-in user's own profile.
 
 use campfire_db::UserChanges;
-use campfire_kit::{Ctx, Error, Redirect, Result, StatusCode, format, permit_keys};
+use campfire_kit::{Ctx, Redirect, Result, StatusCode, format, permit_keys};
 use campfire_views::users;
 
 use crate::app::AppCtx;
@@ -21,13 +21,11 @@ pub async fn show(c: &mut Ctx) -> Result {
     let (avatar_attached, (direct_memberships, shared_memberships)) = {
         let user = user.clone();
         c.app()
-            .db
             .read(move |conn| {
                 let attached = attachments::attached_blob(conn, "User", user.id, "avatar")?.is_some();
                 Ok((attached, presenters::accounts::profile_memberships(conn, &user)?))
             })
-            .await
-            .map_err(Error::internal)?
+            .await?
     };
     let user = presenters::user_summary(&secrets, &user);
     framed_page!(c, StatusCode::OK, |ctx| users::ProfileShow {
@@ -71,13 +69,11 @@ pub async fn update(c: &mut Ctx) -> Result {
     let avatar = avatar.stage(c.app()).await?;
     let pending = c
         .app()
-        .db
         .write(move |tx| {
             user.update(tx, changes)?;
             attachments::assign(tx, Record::user(user.id), "avatar", avatar)
         })
-        .await
-        .map_err(Error::internal)?;
+        .await?;
     attachments::analyze_later(c.app(), pending);
 
     let location = c.url_for(&campfire_routes::user_profile());

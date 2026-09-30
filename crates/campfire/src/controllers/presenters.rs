@@ -29,6 +29,7 @@ use campfire_views::rooms::{RoomView, room_display_name};
 use rails_compat::Secrets;
 use regex::Regex;
 
+use crate::active_storage::storage_error;
 use crate::app::AppState;
 
 pub use rich_text::DbResolver;
@@ -263,7 +264,7 @@ impl<'a> Presenter<'a> {
         // message that isn't UTF-8): then the page fails (verified against the reference).
         match campfire_richtext::to_plain_text(&body, &ctx) {
             Err(campfire_richtext::Error::Unrenderable(error)) => {
-                return Err(campfire_db::Error::Other(format!("message_tag's rescue raised logging {error}")));
+                return Err(campfire_db::Error::other(format!("message_tag's rescue raised logging {error}")));
             }
             Err(_) => return Ok(MessageContent::Unrenderable),
             Ok(_) => {}
@@ -346,7 +347,7 @@ impl<'a> Presenter<'a> {
         // An `Err` is where the edit page raises in Rails (a missing attachment, say).
         campfire_richtext::editable_value(&body, &ctx)
             .map(Option::unwrap_or_default)
-            .map_err(|error| campfire_db::Error::Other(format!("editable_body raised: {error}")))
+            .map_err(|error| campfire_db::Error::other(format!("editable_body raised: {error}")))
     }
 
     /// `messages/_message.json.jbuilder` (`json.cache! message`).
@@ -453,10 +454,6 @@ fn dimension(blob: &campfire_storage::Blob, name: &str) -> Option<RubyNumber> {
         campfire_storage::Json::Float(value) => Some(RubyNumber::Float(*value)),
         _ => None,
     }
-}
-
-pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
-    campfire_db::Error::Other(error.to_string())
 }
 
 #[cfg(test)]

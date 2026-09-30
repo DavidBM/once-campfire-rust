@@ -21,7 +21,7 @@ use crate::channel::{Channel, Params, Subscription};
 use crate::protocol::{self, DisconnectReason};
 use crate::pubsub::{Deliveries, Frame, Subscriber};
 use crate::server::{ConnectRequest, Identified, internal_channel};
-use crate::socket::{Incoming, Reader, Writer};
+use crate::socket::{Incoming, ReadError, Reader, Writer};
 use crate::{Server, json};
 
 struct Entry<U: Send + Sync + 'static> {
@@ -63,6 +63,8 @@ const INCOMING_CAPACITY: usize = 16;
 /// The upgraded HTTP connection a WebSocket runs on.
 pub(crate) type Io = hyper_util::rt::TokioIo<hyper::upgrade::Upgraded>;
 type Sink = Writer<WriteHalf<Io>>;
+/// What the reader task hands the connection: each message, then why it stopped.
+type Received = mpsc::Receiver<Result<Incoming, ReadError>>;
 
 pub(crate) async fn run<U: Identified + Send + Sync + 'static>(server: Server<U>, io: Io, deflate: bool, request: ConnectRequest) {
     let (read, write) = tokio::io::split(io);
@@ -109,24 +111,24 @@ pub(crate) async fn run<U: Identified + Send + Sync + 'static>(server: Server<U>
     loop {
         tokio::select! {
             message = incoming.recv() => match message {
-                Some(Incoming::Text(text)) => connection.dispatch(&text).await,
-                Some(Incoming::Binary) => tracing::error!("Couldn't handle non-string message: Array"),
-                Some(Incoming::Ping(payload)) => {
+                Some(Ok(Incoming::Text(text))) => connection.dispatch(&text).await,
+                Some(Ok(Incoming::Binary)) => tracing::error!("Couldn't handle non-string message: Array"),
+                Some(Ok(Incoming::Ping(payload))) => {
                     if sink.pong(&payload).await.is_err() {
                         break;
                     }
                 }
-                Some(Incoming::Pong) => {}
+                Some(Ok(Incoming::Pong)) => {}
                 // Complete the closing handshake (RFC 6455 §5.5.1) before letting the socket go.
-                Some(Incoming::Close(code)) => {
+                Some(Ok(Incoming::Close(code))) => {
                     let _ = sink.close_reply(code).await;
                     break;
                 }
-                Some(Incoming::Invalid) => {
-                    let _ = sink.close(1002).await;
+                Some(Err(ReadError::Protocol { code })) => {
+                    let _ = sink.close(code).await;
                     break;
                 }
-                None => break,
+                Some(Err(ReadError::Io(_))) | None => break,
             },
             Some(delivery) = deliveries.next() => {
                 // Whatever else is ready already goes out in the same write.
@@ -188,7 +190,7 @@ fn process_internal_message(message: &str) -> Option<Close> {
 
 /// `Connection::Base#respond_to_invalid_request` for an unauthorized connection: tell the client
 /// not to reconnect, and close.
-async fn reject_unauthorized(mut sink: Sink, mut incoming: mpsc::Receiver<Incoming>, reader: JoinHandle<()>, config: &crate::Config) {
+async fn reject_unauthorized(mut sink: Sink, mut incoming: Received, reader: JoinHandle<()>, config: &crate::Config) {
     tracing::error!("An unauthorized connection attempt was rejected");
     let frame = protocol::disconnect(Some(DisconnectReason::Unauthorized), &Value::Bool(false));
     let _ = sink.send(&[frame.into()]).await;
@@ -196,19 +198,15 @@ async fn reject_unauthorized(mut sink: Sink, mut incoming: mpsc::Receiver<Incomi
     reader.abort();
 }
 
-/// Reads the socket until it closes or errors, handing each message to the connection. It stops
-/// after a close frame, as the connection does.
-fn spawn_reader(mut reader: Reader<ReadHalf<Io>>) -> (JoinHandle<()>, mpsc::Receiver<Incoming>) {
+/// Reads the socket until it closes or errors, handing each message, and then the error, to the
+/// connection. It stops after a close frame, as the connection does.
+fn spawn_reader(mut reader: Reader<ReadHalf<Io>>) -> (JoinHandle<()>, Received) {
     let (sender, receiver) = mpsc::channel(INCOMING_CAPACITY);
     let reader = tokio::spawn(async move {
         loop {
-            let message = match reader.next().await {
-                Ok(message) => message,
-                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => Incoming::Invalid,
-                Err(_) => break,
-            };
-            let close = matches!(message, Incoming::Close(_) | Incoming::Invalid);
-            if sender.send(message).await.is_err() || close {
+            let message = reader.next().await;
+            let last = matches!(message, Ok(Incoming::Close(_)) | Err(_));
+            if sender.send(message).await.is_err() || last {
                 break;
             }
         }
@@ -218,11 +216,11 @@ fn spawn_reader(mut reader: Reader<ReadHalf<Io>>) -> (JoinHandle<()>, mpsc::Rece
 
 /// Sends a normal close (1000, no reason, as `ClientSocket#close` defaults) and waits briefly
 /// for the client to finish the handshake.
-async fn close_socket(sink: &mut Sink, incoming: &mut mpsc::Receiver<Incoming>, timeout: std::time::Duration) {
+async fn close_socket(sink: &mut Sink, incoming: &mut Received, timeout: std::time::Duration) {
     if sink.close(1000).await.is_ok() {
         let _ = tokio::time::timeout(timeout, async {
             while let Some(message) = incoming.recv().await {
-                if matches!(message, Incoming::Close(_) | Incoming::Invalid) {
+                if matches!(message, Ok(Incoming::Close(_)) | Err(_)) {
                     break;
                 }
             }

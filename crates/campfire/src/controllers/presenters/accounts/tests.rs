@@ -528,6 +528,27 @@ async fn bans_and_unbans() {
     assert_redirect(&admin.form("delete", &action, &[]).await, &format!("http://campfire.test/users/{jz}"));
 }
 
+/// `bans.create!` refuses a private address, which Rails answers with a 422 (`RecordInvalid`), and
+/// nothing of the ban is kept.
+#[tokio::test]
+async fn a_ban_from_a_private_address_is_unprocessable() {
+    let Some(test) = boot_seed("default").await else { return };
+    let jz: i64 = test.label("users.jz").parse().unwrap();
+    let db = &test.booted.app.db;
+    db.write(move |tx| campfire_db::Session::start(tx, jz, None, Some("192.168.1.20")).map(|_| ())).await.unwrap();
+
+    let mut admin = test.browser("198.51.100.18");
+    admin.sign_in(&test.label("emails.david")).await;
+    let reply = admin.form("post", &format!("/users/{jz}/ban"), &[]).await;
+    assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(reply.text().contains("That didn’t work (422)"), "{}", reply.text());
+
+    let user = db.read(move |conn| campfire_db::User::find(conn, jz)).await.unwrap();
+    assert_eq!(user.status, campfire_db::Status::Active);
+    let bans = db.read(move |conn| Ok(conn.query_row("SELECT COUNT(*) FROM bans WHERE user_id = ?", [jz], |row| row.get::<_, i64>(0))?));
+    assert_eq!(bans.await.unwrap(), 0);
+}
+
 #[tokio::test]
 async fn autocompletes_users() {
     let Some(test) = boot_seed("default").await else { return };

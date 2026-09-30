@@ -14,13 +14,19 @@ async fn echo(c: &mut Ctx) -> Result {
     Ok(c.head(StatusCode::OK))
 }
 
+async fn fail(_: &mut Ctx) -> Result {
+    let cause = std::io::Error::other("disk full");
+    Err(campfire_kit::Error::internal(anyhow::Error::new(cause).context("saving the upload")))
+}
+
 fn app() -> Router {
-    let router = Router::new().route("/echo/{id}", campfire_kit::get(echo).post(action(echo)));
+    let router = Router::new().route("/echo/{id}", campfire_kit::get(echo).post(action(echo))).route("/fail", campfire_kit::get(fail));
     campfire_kit::app(router, Kit::new(KitConfig::default(), testing::crypto(), testing::frozen_clock(), ()))
 }
 
+/// One test, not two: see the note at the top.
 #[tokio::test]
-async fn malformed_params_are_logged_as_they_were_rejected() {
+async fn errors_are_logged_as_they_were_raised() {
     let logs = Logs::default();
     let _guard = tracing::subscriber::set_default(logs.subscriber());
     let query = Request::get("/echo/1?a=%").body(AxumBody::empty()).unwrap();
@@ -29,10 +35,15 @@ async fn malformed_params_are_logged_as_they_were_rejected() {
     for request in [query, form] {
         assert_eq!(app().oneshot(request).await.unwrap().status(), StatusCode::BAD_REQUEST);
     }
+    let failing = Request::get("/fail").body(AxumBody::empty()).unwrap();
+    assert_eq!(app().oneshot(failing).await.unwrap().status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     let text = logs.text();
+    // Malformed params, as they were rejected.
     assert_eq!(text.matches("request rejected error=bad request: invalid %-encoding (%)").count(), 2, "{text}");
     assert!(!text.contains("bad request: bad request"), "{text}");
+    // A failure, with what caused it.
+    assert!(text.contains("request failed error=saving the upload: disk full path=\"/fail\""), "{text}");
 }
 
 /// Log lines written on this thread (the test runtime's only one) while the guard is held.
