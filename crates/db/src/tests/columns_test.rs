@@ -9,7 +9,7 @@ use rails_compat::clock::SystemClock;
 use rusqlite::{Row, params};
 
 use crate::fixtures;
-use crate::{Connection, Membership, Message, Room, RoomType, Timestamp, query_all, schema};
+use crate::{Connection, Involvement, Membership, Message, Room, RoomType, Timestamp, query_all, schema};
 
 /// Where a database's tables got their column order.
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +27,7 @@ const LAYOUTS: [Layout; 2] = [Layout::Schema, Layout::Migrated];
 const MIGRATED_COLUMNS: &[(&str, &[&str])] = &[
     ("messages", &["id", "room_id", "creator_id", "created_at", "updated_at", "client_message_id"]),
     ("rooms", &["id", "name", "created_at", "updated_at", "type", "creator_id"]),
+    ("memberships", &["id", "room_id", "user_id", "created_at", "updated_at", "unread_at", "involvement", "connections", "connected_at"]),
 ];
 
 fn database(layout: Layout) -> Connection {
@@ -101,6 +102,24 @@ fn insert_message(conn: &Connection, message: &Message) {
     .unwrap();
 }
 
+fn insert_membership(conn: &Connection, membership: &Membership) {
+    conn.execute(
+        r#"INSERT INTO "memberships" ("id", "room_id", "user_id", "involvement", "unread_at", "connected_at", "connections", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        params![
+            membership.id,
+            membership.room_id,
+            membership.user_id,
+            membership.involvement,
+            membership.unread_at,
+            membership.connected_at,
+            membership.connections,
+            membership.created_at,
+            membership.updated_at
+        ],
+    )
+    .unwrap();
+}
+
 /// A room with a distinct value in every column.
 fn distinct_room() -> Room {
     Room {
@@ -111,6 +130,15 @@ fn distinct_room() -> Room {
         created_at: at(2004),
         updated_at: at(2005),
     }
+}
+
+/// A room with every nullable column null.
+fn unnamed_room() -> Room {
+    Room { id: 2011, name: None, room_type: RoomType::Direct, creator_id: 2013, created_at: at(2014), updated_at: at(2015) }
+}
+
+fn user_ids(conn: &Connection) -> Vec<i64> {
+    query_all(conn, r#"SELECT "id" FROM "users" ORDER BY "id""#, [], |row| row.get(0)).unwrap()
 }
 
 // Messages
@@ -183,8 +211,7 @@ fn a_room_reads_each_column_into_its_own_field() {
     for layout in LAYOUTS {
         let conn = database(layout);
         let room = distinct_room();
-        let unnamed =
-            Room { id: 2011, name: None, room_type: RoomType::Direct, creator_id: 2013, created_at: at(2014), updated_at: at(2015) };
+        let unnamed = unnamed_room();
         insert_room(&conn, &room);
         insert_room(&conn, &unnamed);
 
@@ -203,7 +230,7 @@ fn rooms_read_by_position_as_by_name() {
         for room in &rooms {
             assert_eq!(&Room::find(&conn, room.id).unwrap(), room, "{layout:?}");
         }
-        for user_id in query_all(&conn, r#"SELECT "id" FROM "users""#, [], |row| row.get::<_, i64>(0)).unwrap() {
+        for user_id in user_ids(&conn) {
             let mut for_user = Room::for_user(&conn, user_id).unwrap();
             for_user.sort_by_key(|room| room.id);
             let by_name = query_all(
@@ -214,6 +241,112 @@ fn rooms_read_by_position_as_by_name() {
             )
             .unwrap();
             assert_eq!(for_user, by_name, "{layout:?}");
+        }
+    }
+}
+
+// Memberships, alone and with their rooms
+
+/// How `Membership::from_row` read a row before it read by position.
+fn membership_by_name(row: &Row<'_>) -> rusqlite::Result<Membership> {
+    Ok(Membership {
+        id: row.get("id")?,
+        room_id: row.get("room_id")?,
+        user_id: row.get("user_id")?,
+        involvement: row.get("involvement")?,
+        unread_at: row.get("unread_at")?,
+        connected_at: row.get("connected_at")?,
+        connections: row.get("connections")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+/// How `with_ordered_room` selected a membership with its room before, the room's columns aliased
+/// so that they could be read by name.
+const WITH_ROOM_BY_NAME: &str = r#"SELECT "memberships".*, "rooms"."id" AS r_id, "rooms"."created_at" AS r_created_at, "rooms"."creator_id" AS r_creator_id, "rooms"."name" AS r_name, "rooms"."type" AS r_type, "rooms"."updated_at" AS r_updated_at FROM "memberships" INNER JOIN "rooms" ON "rooms"."id" = "memberships"."room_id" WHERE "memberships"."user_id" = ?"#;
+
+fn membership_with_room_by_name(row: &Row<'_>) -> rusqlite::Result<(Membership, Room)> {
+    let room = Room {
+        id: row.get("r_id")?,
+        name: row.get("r_name")?,
+        room_type: row.get("r_type")?,
+        creator_id: row.get("r_creator_id")?,
+        created_at: row.get("r_created_at")?,
+        updated_at: row.get("r_updated_at")?,
+    };
+    Ok((membership_by_name(row)?, room))
+}
+
+fn by_membership_id(mut pairs: Vec<(Membership, Room)>) -> Vec<(Membership, Room)> {
+    pairs.sort_by_key(|(membership, _)| membership.id);
+    pairs
+}
+
+#[test]
+fn a_membership_and_its_room_read_each_column_into_their_own_fields() {
+    for layout in LAYOUTS {
+        let conn = database(layout);
+        let (room, unnamed) = (distinct_room(), unnamed_room());
+        let membership = Membership {
+            id: 3001,
+            room_id: room.id,
+            user_id: 3003,
+            involvement: Some(Involvement::Everything),
+            unread_at: Some(at(3004)),
+            connected_at: Some(at(3005)),
+            connections: 3006,
+            created_at: at(3007),
+            updated_at: at(3008),
+        };
+        let unset = Membership {
+            id: 3011,
+            room_id: unnamed.id,
+            user_id: membership.user_id,
+            involvement: None,
+            unread_at: None,
+            connected_at: None,
+            connections: 3016,
+            created_at: at(3017),
+            updated_at: at(3018),
+        };
+        for (membership, room) in [(&membership, &room), (&unset, &unnamed)] {
+            insert_room(&conn, room);
+            insert_membership(&conn, membership);
+        }
+
+        assert_eq!(Membership::find(&conn, membership.id).unwrap(), membership, "{layout:?}");
+        assert_eq!(Membership::find(&conn, unset.id).unwrap(), unset, "{layout:?}");
+        // Ordered by room name, nulls first.
+        assert_eq!(
+            Membership::with_ordered_room(&conn, membership.user_id).unwrap(),
+            [(unset.clone(), unnamed.clone()), (membership.clone(), room.clone())],
+            "{layout:?}"
+        );
+        // A null involvement isn't `!= 'invisible'`.
+        assert_eq!(Membership::visible_with_ordered_room(&conn, membership.user_id).unwrap(), [(membership, room)], "{layout:?}");
+    }
+}
+
+#[test]
+fn memberships_read_by_position_as_by_name() {
+    for layout in LAYOUTS {
+        let conn = database_with_fixtures(layout);
+        let memberships = query_all(&conn, r#"SELECT * FROM "memberships" ORDER BY "id""#, [], membership_by_name).unwrap();
+        assert!(memberships.len() > 5);
+        for membership in &memberships {
+            assert_eq!(&Membership::find(&conn, membership.id).unwrap(), membership, "{layout:?}");
+        }
+        for user_id in user_ids(&conn) {
+            let with_room = query_all(&conn, WITH_ROOM_BY_NAME, [user_id], membership_with_room_by_name).unwrap();
+            let visible = format!(r#"{WITH_ROOM_BY_NAME} AND "memberships"."involvement" != 'invisible'"#);
+            let visible = query_all(&conn, &visible, [user_id], membership_with_room_by_name).unwrap();
+            assert_eq!(by_membership_id(Membership::with_ordered_room(&conn, user_id).unwrap()), by_membership_id(with_room), "{layout:?}");
+            assert_eq!(
+                by_membership_id(Membership::visible_with_ordered_room(&conn, user_id).unwrap()),
+                by_membership_id(visible),
+                "{layout:?}"
+            );
         }
     }
 }

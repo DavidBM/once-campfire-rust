@@ -6,6 +6,7 @@ use rusqlite::{Connection, params};
 use crate::database::Tx;
 use crate::error::{Errors, OptionalExt, Result};
 use crate::events::Event;
+use crate::models::membership::membership_columns;
 use crate::models::{Membership, Message, User};
 use crate::sql::{self, CachedStatements, columns, placeholders, query_all, query_one};
 use crate::time::{SQLITE_NOW, Timestamp};
@@ -278,7 +279,8 @@ impl Room {
     /// (with reconnect) after commit.
     pub fn revoke_from(&self, tx: &mut Tx<'_>, user_ids: &[i64]) -> Result<()> {
         let sql = format!(
-            r#"SELECT "memberships".* FROM "memberships" WHERE "memberships"."room_id" = ? AND "memberships"."user_id" IN ({})"#,
+            r#"SELECT {} FROM "memberships" WHERE "memberships"."room_id" = ? AND "memberships"."user_id" IN ({})"#,
+            membership_columns!(),
             placeholders(user_ids.len())
         );
         let values: Vec<i64> = std::iter::once(self.id).chain(user_ids.iter().copied()).collect();
