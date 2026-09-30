@@ -1,27 +1,30 @@
 //! `ApplicationCable::Connection` (reference/app/channels/application_cable/connection.rb):
 //! `current_user` from the signed `session_token` cookie (`Authentication::SessionLookup`), or
 //! `reject_unauthorized_connection`.
+use std::sync::Arc;
+
 use campfire_cable::{Authenticate, ConnectRequest};
 use campfire_db::{Database, Session, User};
-use campfire_kit::{CookieJar, SharedClock, SharedCrypto};
+use campfire_kit::{CookieJar, SharedClock};
+use rails_compat::Secrets;
 
 use super::CableUser;
 
 pub struct SessionAuthenticator {
     db: Database,
-    crypto: SharedCrypto,
+    secrets: Arc<Secrets>,
     clock: SharedClock,
 }
 
 impl SessionAuthenticator {
-    pub fn new(db: Database, crypto: SharedCrypto, clock: SharedClock) -> Self {
-        Self { db, crypto, clock }
+    pub fn new(db: Database, secrets: Arc<Secrets>, clock: SharedClock) -> Self {
+        Self { db, secrets, clock }
     }
 
     /// `cookies.signed[:session_token]`.
     fn session_token(&self, request: &ConnectRequest) -> Option<String> {
         let headers = request.headers.get_all("cookie").iter().filter_map(|value| value.to_str().ok());
-        CookieJar::from_headers(headers, self.crypto.clone(), self.clock.clone()).signed("session_token")
+        CookieJar::from_headers(headers, self.secrets.clone(), self.clock.clone()).signed("session_token")
     }
 }
 

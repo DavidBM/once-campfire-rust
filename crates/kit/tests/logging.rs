@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::Body as AxumBody;
 use axum::http::{Request, header};
-use campfire_kit::{Ctx, Kit, KitConfig, Result, StatusCode, action, testing};
+use campfire_kit::{Ctx, Kit, KitConfig, Result, StatusCode, TestClock, action};
+use rails_compat::Secrets;
 use tower::ServiceExt;
 
 async fn echo(c: &mut Ctx) -> Result {
@@ -16,7 +17,8 @@ async fn echo(c: &mut Ctx) -> Result {
 
 fn app() -> Router {
     let router = Router::new().route("/echo/{id}", campfire_kit::get(echo).post(action(echo)));
-    campfire_kit::app(router, Kit::new(KitConfig::default(), testing::crypto(), testing::frozen_clock(), ()))
+    let clock = Arc::new(TestClock::frozen_at("2024-06-01T12:00:00Z".parse().unwrap()));
+    campfire_kit::app(router, Kit::new(KitConfig::default(), Arc::new(Secrets::new("test-secret")), clock, ()))
 }
 
 #[tokio::test]

@@ -54,14 +54,13 @@ impl Identified for CableUser {
 pub struct Deps {
     pub db: Database,
     pub secrets: Arc<Secrets>,
-    pub crypto: campfire_kit::SharedCrypto,
     pub clock: campfire_kit::SharedClock,
 }
 
 /// The cable server with `ApplicationCable::Connection` and every channel registered. Mount it
 /// with `cable.router("/cable")`.
 pub fn server(deps: Deps, config: Config) -> Cable {
-    let authenticator = SessionAuthenticator::new(deps.db.clone(), deps.crypto.clone(), deps.clock.clone());
+    let authenticator = SessionAuthenticator::new(deps.db.clone(), deps.secrets.clone(), deps.clock.clone());
     register(Server::builder(config, authenticator), &deps.db, StreamsChannel::new(deps.secrets.clone())).build()
 }
 

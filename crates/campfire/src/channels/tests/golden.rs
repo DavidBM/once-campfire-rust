@@ -326,12 +326,7 @@ async fn start_rust(fixtures: &Fixtures, dir: &Path) -> Target {
     .unwrap();
 
     let secrets = Arc::new(rails_compat::Secrets::new(&reference_secret_key_base()));
-    let deps = Deps {
-        db: db.clone(),
-        secrets: secrets.clone(),
-        crypto: Arc::new(campfire_kit::RailsCrypto::new(secrets)),
-        clock: Arc::new(campfire_kit::SystemClock),
-    };
+    let deps = Deps { db: db.clone(), secrets, clock: Arc::new(campfire_kit::SystemClock) };
     // The reference runs with DISABLE_SSL, so without assume_ssl.
     let server = channels::server(deps, Config { assume_ssl: false, ..Config::default() });
     let _ = sink.server.set(server.clone());

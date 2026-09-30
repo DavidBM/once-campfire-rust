@@ -1,12 +1,12 @@
-//! The shared, per-process part of the HTTP layer: configuration, crypto, clock and app state.
+//! The shared, per-process part of the HTTP layer: configuration, secrets, clock and app state.
 
 use std::any::Any;
 use std::sync::Arc;
 
 use axum::http::{HeaderName, HeaderValue};
+use rails_compat::Secrets;
 
 use crate::clock::SharedClock;
-use crate::crypto::SharedCrypto;
 use crate::exceptions::ErrorPages;
 use crate::request::ProxyConfig;
 use crate::session::SessionConfig;
@@ -76,7 +76,7 @@ pub struct Kit {
 
 pub(crate) struct KitInner {
     pub config: KitConfig,
-    pub crypto: SharedCrypto,
+    pub secrets: Arc<Secrets>,
     pub clock: SharedClock,
     pub state: Arc<dyn Any + Send + Sync>,
 }
@@ -90,16 +90,17 @@ impl std::fmt::Debug for Kit {
 impl Kit {
     /// `state` is the application's own state (database handles etc.), reachable from actions
     /// with [`crate::Ctx::state`].
-    pub fn new<S: Send + Sync + 'static>(config: KitConfig, crypto: SharedCrypto, clock: SharedClock, state: S) -> Self {
-        Self { inner: Arc::new(KitInner { config, crypto, clock, state: Arc::new(state) }) }
+    pub fn new<S: Send + Sync + 'static>(config: KitConfig, secrets: Arc<Secrets>, clock: SharedClock, state: S) -> Self {
+        Self { inner: Arc::new(KitInner { config, secrets, clock, state: Arc::new(state) }) }
     }
 
     pub fn config(&self) -> &KitConfig {
         &self.inner.config
     }
 
-    pub fn crypto(&self) -> &SharedCrypto {
-        &self.inner.crypto
+    /// What cookies are signed and encrypted with.
+    pub fn secrets(&self) -> &Arc<Secrets> {
+        &self.inner.secrets
     }
 
     pub fn clock(&self) -> &SharedClock {

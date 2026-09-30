@@ -1,6 +1,6 @@
 //! Old-browser-tab continuity: a session cookie and a signed cookie issued by the reference Rails
-//! app (`vectors/rails_compat.json`) are accepted by the kit with real `RailsCrypto`, and what the
-//! kit writes back decodes to the same session. Forgery protection is by `Sec-Fetch-Site` rather
+//! app (`vectors/rails_compat.json`) are accepted by the kit, and what the kit writes back decodes
+//! to the same session. Forgery protection is by `Sec-Fetch-Site` rather
 //! than Rails' tokens, so a tab opened before an upgrade keeps working without one.
 
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, header};
-use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, Result, StatusCode, TestClock, action};
+use campfire_kit::{Ctx, Kit, KitConfig, Result, StatusCode, TestClock, action};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -32,7 +32,7 @@ async fn whoami(c: &mut Ctx) -> Result {
 fn app(vectors: &Value) -> (Router, Arc<rails_compat::Secrets>) {
     let secrets = Arc::new(rails_compat::Secrets::new(vectors["secret_key_base"].as_str().unwrap()));
     let now = vectors["now"].as_str().unwrap().parse().unwrap();
-    let kit = Kit::new(KitConfig::default(), Arc::new(RailsCrypto::new(secrets.clone())), Arc::new(TestClock::frozen_at(now)), ());
+    let kit = Kit::new(KitConfig::default(), secrets.clone(), Arc::new(TestClock::frozen_at(now)), ());
     let router = Router::new().route("/session", action_post()).route("/whoami", campfire_kit::get(whoami));
     (campfire_kit::app(router, kit), secrets)
 }

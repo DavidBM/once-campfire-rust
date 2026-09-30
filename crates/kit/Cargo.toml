@@ -47,12 +47,7 @@ p256 = { workspace = true, features = ["pkcs8", "pem"] }
 libc.workspace = true
 hex.workspace = true
 
-[features]
-# `campfire_kit::testing`: insecure stand-ins for tests.
-test-support = []
-
 [dev-dependencies]
-campfire_kit = { path = ".", features = ["test-support"] }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 # tests/front.rs: a WebSocket backend behind the front server
 axum = { workspace = true, features = ["ws"] }

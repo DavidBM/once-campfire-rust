@@ -16,7 +16,7 @@ use axum::Router;
 use axum::middleware::Next;
 use campfire_db::Database;
 use campfire_kit::exceptions::ErrorPages;
-use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, SharedClock, SharedCrypto};
+use campfire_kit::{Ctx, Kit, KitConfig, SharedClock};
 use campfire_storage::{DiskService, Storage};
 use campfire_views::fragment_cache::{FragmentCache, Scoped};
 use rails_compat::Secrets;
@@ -78,7 +78,6 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
     config.storage.create_dirs()?;
     let secrets = Arc::new(Secrets::new(&config.secret_key_base));
     let clock = campfire_kit::clock::from_env()?;
-    let crypto: SharedCrypto = Arc::new(RailsCrypto::new(secrets.clone()));
 
     let (jobs, queue) = jobs::Jobs::new(jobs::QUEUE_CAPACITY);
     let rich_text = Arc::new(AppRichText::new(secrets.clone(), clock.clone()));
@@ -91,7 +90,7 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
         Arc::new(Storage::new(DiskService::new(&config.storage.files, "local"), rails_compat::app_verifier(&secrets, "ActiveStorage")));
 
     let cable_config = campfire_cable::Config { assume_ssl: !config.disable_ssl, ..campfire_cable::Config::default() };
-    let deps = channels::Deps { db: db.clone(), secrets: secrets.clone(), crypto: crypto.clone(), clock: clock.clone() };
+    let deps = channels::Deps { db: db.clone(), secrets: secrets.clone(), clock: clock.clone() };
     let cable = channels::server(deps, cable_config);
 
     let mut kit_config = KitConfig::production(config.disable_ssl);
@@ -117,7 +116,7 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
     crate::integrations::register_jobs(&mut registry);
     let runner = jobs::start(queue, app.clone(), registry, app.config.job_concurrency);
 
-    let kit = Kit::new(kit_config, crypto, clock, app.clone());
+    let kit = Kit::new(kit_config, app.secrets.clone(), clock, app.clone());
     let router = router(&app, kit);
     Ok(Booted { app, router, jobs: runner })
 }

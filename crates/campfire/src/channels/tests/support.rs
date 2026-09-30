@@ -8,7 +8,7 @@ use campfire_cable::Config;
 use campfire_db::fixtures::{self, identify};
 use campfire_db::rich_text::BasicRichText;
 use campfire_db::{Boost, Database, Event, EventSink, Membership, Message, Room, Session, Timestamp};
-use campfire_kit::{Clock, Crypto, RailsCrypto, TestClock};
+use campfire_kit::{Clock, TestClock};
 use futures_util::{SinkExt, StreamExt};
 use rails_compat::Secrets;
 use serde_json::{Value, json};
@@ -63,7 +63,7 @@ pub async fn start() -> TestApp {
     .unwrap();
 
     let secrets = Arc::new(Secrets::new(SECRET_KEY_BASE));
-    let deps = Deps { db: db.clone(), secrets: secrets.clone(), crypto: Arc::new(RailsCrypto::new(secrets.clone())), clock: clock.clone() };
+    let deps = Deps { db: db.clone(), secrets: secrets.clone(), clock: clock.clone() };
     let server = channels::server(deps, Config { assume_ssl: false, ..Config::default() });
     let _ = sink.server.set(server.clone());
 
@@ -106,7 +106,7 @@ impl TestApp {
     }
 
     pub fn cookie_with_token_expiring(&self, token: &str, expires_at: Option<jiff::Timestamp>) -> String {
-        let signed = RailsCrypto::new(self.secrets.clone()).sign_cookie("session_token", token, expires_at);
+        let signed = rails_compat::cookies::sign(&self.secrets, "session_token", token, expires_at);
         format!("session_token={}", signed.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D"))
     }
 
