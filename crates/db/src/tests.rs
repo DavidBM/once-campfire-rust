@@ -16,8 +16,8 @@ use std::sync::Arc;
 use rails_compat::clock::{Clock, TestClock};
 
 use crate::fixtures::{self, identify};
-use crate::rich_text::BasicRichText;
-use crate::{Config, Connection, Database, Env, Event, RecordingSink, Result, Timestamp, Tx};
+use crate::testing::{BasicRichText, RecordingSink};
+use crate::{Config, Connection, Database, Env, Event, Result, Timestamp, Tx};
 
 /// A database loaded with the fixtures, a recording event sink and a controllable clock
 /// (`fixtures :all` plus `ActiveSupport::Testing::TimeHelpers`).

@@ -27,13 +27,13 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
-use rails_compat::clock::{SharedClock, SystemClock};
+use rails_compat::clock::SharedClock;
 use rusqlite::{Connection, OpenFlags};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{Error, Result};
-use crate::events::{Event, EventSink, NullSink};
-use crate::rich_text::{BasicRichText, RichText};
+use crate::events::{Event, EventSink};
+use crate::rich_text::RichText;
 use crate::schema;
 use crate::time::Timestamp;
 
@@ -47,17 +47,6 @@ pub struct Env {
     /// BCrypt cost for `has_secure_password`. Rails uses `BCrypt::Engine.cost` (12), or
     /// `MIN_COST` (4) in the test environment.
     pub bcrypt_cost: u32,
-}
-
-impl Default for Env {
-    fn default() -> Self {
-        Self {
-            clock: Arc::new(SystemClock),
-            sink: Arc::new(NullSink),
-            rich_text: Arc::new(BasicRichText),
-            bcrypt_cost: rails_compat::password::COST,
-        }
-    }
 }
 
 impl Env {

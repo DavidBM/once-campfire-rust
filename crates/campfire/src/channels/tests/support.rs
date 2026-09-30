@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use campfire_cable::Config;
 use campfire_db::fixtures::{self, identify};
-use campfire_db::rich_text::BasicRichText;
+use campfire_db::testing::BasicRichText;
 use campfire_db::{Boost, Database, Event, EventSink, Membership, Message, Room, Session, Timestamp};
 use campfire_kit::{Clock, TestClock};
 use futures_util::{SinkExt, StreamExt};

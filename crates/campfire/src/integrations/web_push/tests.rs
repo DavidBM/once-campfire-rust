@@ -333,7 +333,8 @@ async fn pushes_messages_and_destroys_expired_subscriptions() {
     });
     let message = create(t.clone()).await;
     let (queued_pool, now) = (pool.clone(), t.db.env().now());
-    let payload = t.db.read(move |conn| push_message(&queued_pool, conn, &campfire_db::BasicRichText, &message, now)).await.unwrap();
+    let payload =
+        t.db.read(move |conn| push_message(&queued_pool, conn, &campfire_db::testing::BasicRichText, &message, now)).await.unwrap();
     assert_eq!(payload.title, "Designers");
     assert_eq!(payload.body, "David: Hey @kevin");
     pool.shutdown().await;
@@ -359,7 +360,7 @@ async fn pushes_messages_and_destroys_expired_subscriptions() {
     let before = t.db.read(PushSubscription::count).await.unwrap();
     let message = create(t.clone()).await;
     let (queued_pool, now) = (pool.clone(), t.db.env().now());
-    t.db.read(move |conn| push_message(&queued_pool, conn, &campfire_db::BasicRichText, &message, now)).await.unwrap();
+    t.db.read(move |conn| push_message(&queued_pool, conn, &campfire_db::testing::BasicRichText, &message, now)).await.unwrap();
     pool.shutdown().await;
     assert_eq!(t.db.read(PushSubscription::count).await.unwrap(), before - 2);
 }

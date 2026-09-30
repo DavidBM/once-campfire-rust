@@ -294,7 +294,8 @@ pub struct TestDb {
 
 impl TestDb {
     pub fn new() -> Self {
-        use campfire_db::{BasicRichText, Config, Database, Env, NullSink, fixtures};
+        use campfire_db::testing::{BasicRichText, NullSink};
+        use campfire_db::{Config, Database, Env, fixtures};
         use campfire_kit::TestClock;
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
