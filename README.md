@@ -418,13 +418,16 @@ Deliberate:
   502; the app leaves that line out like the others.
 - **Media is processed off the database writer.** Rails saves a blob's row and then uploads its
   file after commit; here the upload is copied into storage first, straight from the request's
-  tempfile, and deleted again if the save fails. Variants, video posters and analysis run on
-  background threads (at most four at a time), and only their rows are written in a transaction, so
-  a large image or video doesn't hold up other writes. A variant or poster is saved already
-  analyzed, where Rails analyzes it in a job after commit; the rows end up the same. Two requests for
-  the same missing variant may both transform it: the first to save wins and the other's file is
-  deleted. ffmpeg is stopped after 60 seconds of drawing a poster and ffprobe after 30 seconds of
-  reading a file, which Rails doesn't limit.
+  tempfile, and deleted again if the save fails. Rails' disk service then reads the copy back to
+  check its MD5 against the checksum it just computed from the same bytes; the app skips that
+  second pass, and checks the file as before whenever it's opened for analysis, a variant or a
+  poster. A direct upload is still checked against the checksum its client gave. Variants, video
+  posters and analysis run on background threads (at most four at a time), and only their rows
+  are written in a transaction, so a large image or video doesn't hold up other writes. A variant
+  or poster is saved already analyzed, where Rails analyzes it in a job after commit; the rows end
+  up the same. Two requests for the same missing variant may both transform it: the first to save
+  wins and the other's file is deleted. ffmpeg is stopped after 60 seconds of drawing a poster and
+  ffprobe after 30 seconds of reading a file, which Rails doesn't limit.
 - **Floats in JSON have the shortest digits.** Rails writes them with the json gem's Grisu2,
   which now and then picks a longer form of the same number (`250.70174600000001` for
   `250.701746`); the app writes the shortest one, laid out the same way, in blob metadata and

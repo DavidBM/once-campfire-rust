@@ -10,6 +10,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use campfire_storage::key::checksum_file;
 use campfire_storage::marshal::Value;
 use campfire_storage::{Blob, DiskService, Filename, Json, Storage, Variation, disk, disposition, marcel, paths};
 use rails_compat::{MessageVerifier, Secrets};
@@ -368,6 +369,10 @@ fn staging_a_file_unfurls_it_as_its_bytes_would() {
         let (a, b) = (from_file.blob(), from_bytes.blob());
         assert_eq!((&a.content_type, &a.checksum, a.byte_size), (&b.content_type, &b.checksum, b.byte_size), "{name}");
         assert_eq!(std::fs::read(storage.service.path_for(&a.key)).unwrap(), std::fs::read(fixture(name)).unwrap(), "{name}");
+        // Staging doesn't read the copies back, so check here what `DiskService#upload` would.
+        for staged in [a, b] {
+            assert_eq!(checksum_file(&storage.service.path_for(&staged.key)).unwrap(), staged.checksum, "{name}");
+        }
     }
 }
 

@@ -193,3 +193,24 @@ fn folder_for(key: &str) -> String {
 fn not_found(e: io::Error) -> Error {
     if e.kind() == io::ErrorKind::NotFound { Error::FileNotFound } else { e.into() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::key::checksum;
+
+    #[test]
+    fn an_upload_with_a_checksum_is_verified() {
+        let root = tempfile::tempdir().unwrap();
+        let service = DiskService::new(root.path(), "local");
+        service.upload("matching", &b"bytes"[..], Some(&checksum(b"bytes"))).unwrap();
+        assert_eq!(service.download("matching").unwrap(), b"bytes");
+
+        let mismatched = service.upload("mismatched", &b"bytes"[..], Some(&checksum(b"other bytes")));
+        assert!(matches!(mismatched, Err(Error::Integrity)), "{mismatched:?}");
+        assert!(!service.exist("mismatched"));
+
+        service.upload("unchecked", &b"bytes"[..], None).unwrap();
+        assert_eq!(service.download("unchecked").unwrap(), b"bytes");
+    }
+}
