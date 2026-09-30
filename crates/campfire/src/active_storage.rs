@@ -306,7 +306,8 @@ fn send_blob_byte_range_data(c: &mut Ctx, blob: &Blob, range: &str) -> Result {
     let (content_type, parts, content_range) = if let [(start, end)] = ranges[..] {
         (content_type_for_serving, vec![BodyPart::File { path, start, end }], Some(format!("bytes {start}-{end}/{size}")))
     } else {
-        let boundary = random_hex(16);
+        // `SecureRandom.hex`: 16 random bytes.
+        let boundary = hex::encode(rand::random::<[u8; 16]>());
         let mut parts = Vec::new();
         for &(start, end) in &ranges {
             let heading = format!(
@@ -632,12 +633,6 @@ fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
 
 fn storage_error_to_kit(error: campfire_storage::Error) -> Error {
     Error::internal(error)
-}
-
-fn random_hex(bytes: usize) -> String {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    (0..bytes).map(|_| format!("{:02x}", rng.random::<u8>())).collect()
 }
 
 #[cfg(test)]

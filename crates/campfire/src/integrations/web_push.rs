@@ -11,9 +11,8 @@ mod vapid;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use campfire_db::{Connection, Message, PushPayload, PushSubscription, RichText, Timestamp};
+use rails_compat::encoding;
 
 use crate::integrations::net::http::{self, Endpoint, HttpError, Timeouts};
 use crate::integrations::net::{Network, guard};
@@ -242,16 +241,12 @@ fn unix_now() -> i64 {
 
 /// `WebPush.decode64` (`Base64.urlsafe_decode64`): either alphabet, padding optional.
 pub(crate) fn decode64(value: &str) -> Result<Vec<u8>, EncryptionError> {
-    let mut value = value.replace('-', "+").replace('_', "/");
-    if !value.ends_with('=') && !value.len().is_multiple_of(4) {
-        value.push_str(&"=".repeat(4 - value.len() % 4));
-    }
-    STANDARD.decode(value).map_err(|_| EncryptionError::Argument("invalid base64".into()))
+    encoding::urlsafe_decode(value).ok_or_else(|| EncryptionError::Argument("invalid base64".into()))
 }
 
 /// `trim_encode64`: urlsafe Base64 without padding.
 pub(crate) fn encode64_nopad(bytes: &[u8]) -> String {
-    URL_SAFE_NO_PAD.encode(bytes)
+    encoding::urlsafe_encode_unpadded(bytes)
 }
 
 #[cfg(test)]

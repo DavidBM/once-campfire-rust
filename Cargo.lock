@@ -345,6 +345,7 @@ dependencies = [
  "campfire_views",
  "flate2",
  "futures-util",
+ "hex",
  "hkdf",
  "http",
  "http-body-util",
@@ -518,6 +519,7 @@ version = "0.1.0"
 dependencies = [
  "askama",
  "campfire_routes",
+ "crc32fast",
  "html5ever",
  "jiff",
  "rails_compat",
