@@ -179,6 +179,15 @@ async fn whoami(c: &mut Ctx) -> Result {
 /// browser and operating system the layout sees.
 async fn platform(c: &mut Ctx) -> Result {
     before_actions(c, Before::default().allow_unauthenticated_access()).await?;
+    platform_reply(c)
+}
+
+/// The same answer from an action that skips the chain, so `allow_browser` never runs.
+async fn platform_without_the_chain(c: &mut Ctx) -> Result {
+    platform_reply(c)
+}
+
+fn platform_reply(c: &mut Ctx) -> Result {
     let kept = c.current::<crate::concerns::platform::ApplicationPlatform>().is_some();
     let view = crate::concerns::platform(c).to_view();
     Ok(c.html(format!("{kept} {:?} {:?}", view.browser, view.operating_system)))
@@ -270,19 +279,28 @@ async fn allow_browser_keeps_the_platform_it_parsed_for_the_layout() {
     let Some(test) = boot_seeded().await else { return };
     let app = &test.booted.app;
     let kit = Kit::new(KitConfig::production(true), app.secrets.clone(), app.clock.clone(), app.clone());
-    let router = campfire_kit::app(axum::Router::new().route("/platform", campfire_kit::get(platform)), kit);
+    let routes = axum::Router::new()
+        .route("/platform", campfire_kit::get(platform))
+        .route("/platform/without_the_chain", campfire_kit::get(platform_without_the_chain));
+    let router = campfire_kit::app(routes, kit);
 
     let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
     // Without a User-Agent to check, the layout parses the gem's default, "Mozilla/4.0 (compatible)".
-    for (user_agent, expected) in
-        [(Some(chrome), r#"true "Chrome" "Windows""#), (None, r#"false "Mozilla" """#), (Some(" "), r#"false "Mozilla" """#)]
-    {
-        let mut request = Request::get("/platform").header(header::HOST, "campfire.test");
+    // Where `allow_browser` didn't run, the layout parses the header itself.
+    let cases = [
+        ("/platform", Some(chrome), r#"true "Chrome" "Windows""#),
+        ("/platform", None, r#"false "Mozilla" """#),
+        ("/platform", Some(" "), r#"false "Mozilla" """#),
+        ("/platform/without_the_chain", Some(chrome), r#"false "Chrome" "Windows""#),
+        ("/platform/without_the_chain", None, r#"false "Mozilla" """#),
+    ];
+    for (path, user_agent, expected) in cases {
+        let mut request = Request::get(path).header(header::HOST, "campfire.test");
         if let Some(user_agent) = user_agent {
             request = request.header(header::USER_AGENT, user_agent);
         }
         let reply = send(&router, request.body(Body::empty()).unwrap()).await;
-        assert_eq!((reply.status, reply.text().as_str()), (StatusCode::OK, expected), "{user_agent:?}");
+        assert_eq!((reply.status, reply.text().as_str()), (StatusCode::OK, expected), "{path} {user_agent:?}");
     }
 }
 
