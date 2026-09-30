@@ -22,7 +22,7 @@ const RUNS: usize = 7;
 
 fn main() {
     assert_eq!(hex::encode(Sha256::digest(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    println!("{} with SHA-256 instructions: {}", std::env::consts::ARCH, has_sha256_instructions());
+    println!("{}, CPU has SHA-256 instructions: {}", std::env::consts::ARCH, cpu_has_sha256_instructions());
     println!("digest of every length to 2 KB: {}", digest_of_every_length(2048));
     for (name, size) in SIZES {
         let input = page_like_bytes(size);
@@ -65,16 +65,16 @@ fn page_like_bytes(size: usize) -> Vec<u8> {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn has_sha256_instructions() -> bool {
+fn cpu_has_sha256_instructions() -> bool {
     std::arch::is_aarch64_feature_detected!("sha2")
 }
 
 #[cfg(target_arch = "x86_64")]
-fn has_sha256_instructions() -> bool {
+fn cpu_has_sha256_instructions() -> bool {
     std::arch::is_x86_feature_detected!("sha")
 }
 
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-fn has_sha256_instructions() -> bool {
+fn cpu_has_sha256_instructions() -> bool {
     false
 }
