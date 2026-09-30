@@ -44,11 +44,16 @@ Stored pieces (55–60 µs) and cable frames (9.7–12.1 µs) are unchanged: at 
 little window to slide and few long matches.
 
 In steady state the room, messages and search pages (and the sidebar) reuse their stored
-compressed pieces, so a request to them compresses only new content. The whole-body numbers apply
-to what is deflated afresh on each request: bodies under 1 KB, responses without parts, and static
-assets the front server doesn't cache (over `MAX_CACHE_ITEM_SIZE`, 1 MB, such as the 2.18 MB
-source map).
+compressed pieces, so a request to them compresses only new content. Through the front server (on
+by default), the gzipped response of every static asset is cached after its first request, the
+source map included: the cache's item limit (`MAX_CACHE_ITEM_SIZE`, 1 MB) applies to the body it
+records, which for a gzip client is already compressed, and the 2.18 MB map gzips to 426,066 B.
+So with the front on, an asset is deflated once per cache fill, not once per request. Whole-body
+deflate runs per request only for responses without parts (bodies under 1 KB among them), for cache
+misses and first renders, and wherever the front is bypassed (the bare app on `TARGET_PORT`).
 
 ## Over HTTP
 
-To be added by the coordinator.
+To be added by the coordinator. Through the front, lexxy.js and its map would come from the
+response cache after the first request and time the same before and after, so the asset comparison
+(`--gzip 1`) runs against the bare app port, `PORT + 1`.
