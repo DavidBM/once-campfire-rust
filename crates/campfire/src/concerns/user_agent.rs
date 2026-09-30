@@ -210,6 +210,25 @@ fn is_ruby_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
 }
 
+/// `a.downcase == b.downcase`. Two ASCII strings can compare byte by byte, ignoring ASCII case:
+/// lowercasing them changes only A-Z. Anything else is lowercased first, because a non-ASCII
+/// character can lowercase to an ASCII one (U+212A KELVIN SIGN to "k").
+fn same_ignoring_case(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() { a.eq_ignore_ascii_case(b) } else { a.to_lowercase() == b.to_lowercase() }
+}
+
+/// `haystack.downcase.include?(needle)` for a non-empty, lowercase ASCII `needle`, with the same
+/// ASCII fast path as [`same_ignoring_case`]. For short haystacks: product names and comments.
+/// A whole header is quicker to lowercase once and search (`String::to_lowercase` has its own
+/// ASCII path).
+fn contains_ignoring_case(haystack: &str, needle: &str) -> bool {
+    if haystack.is_ascii() {
+        haystack.as_bytes().windows(needle.len()).any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+    } else {
+        haystack.to_lowercase().contains(needle)
+    }
+}
+
 /// ActiveSupport's `present?` for strings.
 pub(crate) fn is_present(string: &str) -> bool {
     !string.chars().all(char::is_whitespace)
@@ -325,7 +344,7 @@ impl Kind {
                     && (p.comment_at(1).is_some_and(|c| c.contains("MSIE")) || p.joined_comment().is_some_and(|c| trident_rv(&c)))
             }),
             Kind::Opera => first.is_some_and(|p| p.product == "Opera") || products.last().is_some_and(|p| p.product == "OPR"),
-            Kind::WechatBrowser => products.iter().any(|p| p.product.to_lowercase().contains("micromessenger")),
+            Kind::WechatBrowser => products.iter().any(|p| contains_ignoring_case(&p.product, "micromessenger")),
             Kind::Vivaldi => any("Vivaldi"),
             Kind::Chrome => any("Chrome") || any("CriOS"),
             Kind::ITunes => any("iTunes"),
@@ -337,7 +356,7 @@ impl Kind {
                 products.len() >= 3 && products[0].product == "Podcast" && products[1].product == "Addict" && products[2].product == "-"
             }
             Kind::Webkit => products.iter().any(|p| {
-                p.product.to_lowercase() == "applewebkit" || p.comment.iter().flatten().any(|c| webkit_comment_version(c).is_some())
+                same_ignoring_case(&p.product, "applewebkit") || p.comment.iter().flatten().any(|c| webkit_comment_version(c).is_some())
             }),
             Kind::Gecko => first.is_some_and(|p| p.product == "Mozilla"),
             Kind::WindowsMediaPlayer => products.iter().any(|p| {
@@ -380,7 +399,7 @@ impl Agent {
             return true;
         };
 
-        self.products.iter().flat_map(|p| p.comment.iter().flatten()).any(|c| c.to_lowercase().contains("bot"))
+        self.products.iter().flat_map(|p| p.comment.iter().flatten()).any(|c| contains_ignoring_case(c, "bot"))
             || self.detect_product("Chrome-Lighthouse").is_some()
             || application.product.contains("bot")
     }
@@ -398,8 +417,7 @@ impl Agent {
     /// `detect_product`: case-insensitive product name lookup (also what `respond_to?` and
     /// `method_missing` use).
     fn detect_product(&self, name: &str) -> Option<&Product> {
-        let name = name.to_lowercase();
-        self.products.iter().find(|p| p.product.to_lowercase() == name)
+        self.products.iter().find(|p| same_ignoring_case(&p.product, name))
     }
 
     /// `application`: most classes use the first product; the WebKit-based ones the first product
@@ -567,7 +585,7 @@ impl Agent {
 
     /// `Webkit#webkit.version`: the AppleWebKit product's version, or one from a comment.
     fn webkit(&self) -> Option<Version> {
-        if let Some(product) = self.products.iter().find(|p| p.product.to_lowercase() == "applewebkit") {
+        if let Some(product) = self.products.iter().find(|p| same_ignoring_case(&p.product, "applewebkit")) {
             return Some(product.version.clone());
         }
         self.products.iter().flat_map(|p| p.comment.iter().flatten()).find_map(|c| webkit_comment_version(c)).map(Version::new)
@@ -1013,8 +1031,8 @@ fn capture_after<'a>(s: &'a str, prefix: &str, class: impl Fn(char) -> bool) -> 
 
 /// `WEBKIT_VERSION_REGEXP = /\A(?<webkit>AppleWebKit)\/(?<version>[\d\.]+)/i`: the version.
 fn webkit_comment_version(comment: &str) -> Option<&str> {
-    let name: String = comment.chars().take(11).collect();
-    if name.chars().count() != 11 || name.to_lowercase() != "applewebkit" {
+    let name = &comment[..comment.char_indices().nth(11).map_or(comment.len(), |(i, _)| i)];
+    if name.chars().count() != 11 || !same_ignoring_case(name, "applewebkit") {
         return None;
     }
     let tail = comment[name.len()..].strip_prefix('/')?;
@@ -1052,6 +1070,7 @@ pub(crate) mod corpus;
 pub(crate) mod tests {
     use super::*;
     use serde_json::{Value, json};
+    use std::collections::BTreeSet;
 
     pub(crate) fn vectors() -> Value {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../vectors/campfire_user_agents.json");
@@ -1199,6 +1218,24 @@ pub(crate) mod tests {
             let product = Product { product, version: Version::new(&version), comment: comment.map(|comment| ruby_split(&comment, "; ")) };
             Some((i, product))
         }
+
+        pub fn same_ignoring_case(a: &str, b: &str) -> bool {
+            a.to_lowercase() == b.to_lowercase()
+        }
+
+        pub fn contains_ignoring_case(haystack: &str, needle: &str) -> bool {
+            haystack.to_lowercase().contains(needle)
+        }
+
+        pub fn webkit_comment_version(comment: &str) -> Option<&str> {
+            let name: String = comment.chars().take(11).collect();
+            if name.chars().count() != 11 || name.to_lowercase() != "applewebkit" {
+                return None;
+            }
+            let tail = comment[name.len()..].strip_prefix('/')?;
+            let digits = tail.bytes().take_while(|&b| b.is_ascii_digit() || b == b'.').count();
+            (digits > 0).then(|| &tail[..digits])
+        }
     }
 
     fn fields(product: &Product) -> (&str, &str, Option<&[String]>) {
@@ -1214,6 +1251,60 @@ pub(crate) mod tests {
             for prefix in prefixes {
                 let (fast, slow) = (parse(prefix).products, straightforward::products(prefix));
                 assert_eq!(fast.iter().map(fields).collect::<Vec<_>>(), slow.iter().map(fields).collect::<Vec<_>>(), "{prefix:?}");
+            }
+        }
+    }
+
+    /// Characters whose lowercase is ASCII though they aren't, or is longer than they are.
+    const SPECIAL_CASES: [&str; 12] = ["\u{212A}", "k", "K", "\u{130}", "i\u{307}", "I", "ß", "SS", "Σ", "σ", "ς", "ÀPPLEWEBKIT"];
+
+    /// Every product name the test agents parse to, and the special cases.
+    fn product_names() -> BTreeSet<String> {
+        let products = user_agents().into_iter().flat_map(|user_agent| parse(&user_agent.unwrap_or_default()).products);
+        products.map(|product| product.product).chain(SPECIAL_CASES.map(String::from)).collect()
+    }
+
+    /// Every comment and whole test agent, and the product names.
+    fn texts() -> BTreeSet<String> {
+        let mut texts = product_names();
+        for user_agent in user_agents().into_iter().flatten() {
+            texts.extend(parse(&user_agent).products.into_iter().flat_map(|product| product.comment.into_iter().flatten()));
+            texts.insert(user_agent);
+        }
+        texts
+    }
+
+    #[test]
+    fn compares_ignoring_case_like_lowercasing_both() {
+        // What `detect_product` looks for; Gecko's `version` also looks for the first product.
+        let looked_for = ["Chrome-Lighthouse", "Iron", "PaleMoon", "Firefox", "Camino", "Iceweasel", "Seamonkey", "MicroMessenger"];
+        let looked_for = looked_for.into_iter().chain(["CriOs", "chrome", "iTunes", "Version", "OPR", "NSPlayer", "Mobile", "applewebkit"]);
+        let names = product_names();
+        let looked_for: Vec<&str> = looked_for.chain(names.iter().map(String::as_str)).collect();
+
+        for name in &names {
+            for other in &looked_for {
+                assert_eq!(same_ignoring_case(name, other), straightforward::same_ignoring_case(name, other), "{name:?} {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn searches_ignoring_case_like_lowercasing_the_haystack() {
+        for haystack in texts() {
+            for needle in ["bot", "micromessenger", "facebookexternalhit", "twitterbot", "k"] {
+                let expected = straightforward::contains_ignoring_case(&haystack, needle);
+                assert_eq!(contains_ignoring_case(&haystack, needle), expected, "{haystack:?} {needle:?}");
+            }
+        }
+    }
+
+    /// Each comment, and each of its suffixes.
+    #[test]
+    fn reads_webkit_comment_versions_like_lowercasing_the_name() {
+        for text in texts() {
+            for comment in text.char_indices().map(|(i, _)| &text[i..]) {
+                assert_eq!(webkit_comment_version(comment), straightforward::webkit_comment_version(comment), "{comment:?}");
             }
         }
     }
