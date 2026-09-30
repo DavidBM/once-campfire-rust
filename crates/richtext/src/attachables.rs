@@ -1,7 +1,7 @@
 //! Resolving `<action-text-attachment>` nodes to what they attach, and rendering each attachable's
 //! partial, as Action Text, Lexxy and Campfire's extensions do.
 
-use base64::Engine;
+use rails_compat::encoding;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -243,16 +243,7 @@ fn attachable_from_possibly_expired_sgid(sgid: Option<&str>, ctx: &RenderContext
 
 /// `Base64.strict_decode64(message) rescue Base64.urlsafe_decode64(message)`
 fn decode_base64(message: &str) -> Result<Vec<u8>, Error> {
-    let strict = base64::engine::general_purpose::STANDARD;
-    if let Ok(bytes) = strict.decode(message) {
-        return Ok(bytes);
-    }
-    let padded = if !message.ends_with('=') && !message.len().is_multiple_of(4) {
-        format!("{message}{}", "=".repeat(4 - message.len() % 4))
-    } else {
-        message.to_string()
-    };
-    strict.decode(padded.replace('-', "+").replace('_', "/")).map_err(|_| Error::Raised("ArgumentError: invalid base64"))
+    encoding::strict_decode(message).or_else(|| encoding::urlsafe_decode(message)).ok_or(Error::Raised("ArgumentError: invalid base64"))
 }
 
 // --- Opengraph embeds --------------------------------------------------------------------------
@@ -485,4 +476,58 @@ pub fn attachment_plain_text(attachment: &Attachment) -> PlainTextRepresentation
 pub enum PlainTextRepresentation {
     Html(String),
     Content(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `GlobalID.find` over the reference's records the vectors name: users 1 and 2 exist, and the
+    /// default locator ignores the GID's app.
+    struct VectorRecords;
+
+    impl AttachableResolver for VectorRecords {
+        fn locate_signed(&self, _sgid: &str) -> SignedLookup {
+            SignedLookup::Invalid
+        }
+
+        fn find_gid(&self, gid: &str) -> GidLookup {
+            let Some((_app, path)) = gid.strip_prefix("gid://").and_then(|rest| rest.split('?').next()?.split_once('/')) else {
+                return GidLookup::NotFound;
+            };
+            match path.strip_prefix("User/") {
+                Some(id @ ("1" | "2")) => GidLookup::User(MentionUser {
+                    id: id.parse().unwrap(),
+                    name: String::new(),
+                    title: String::new(),
+                    attachable_sgid: String::new(),
+                    user_path: String::new(),
+                    avatar_path: String::new(),
+                }),
+                Some(_) => GidLookup::NotFound,
+                None => GidLookup::OtherModel,
+            }
+        }
+    }
+
+    /// The reference's answers for SGIDs whose signature doesn't verify (`unverified_sgids` in
+    /// `vectors/rails_compat.json`, from `reference-tools/rails_compat_vectors.rb`).
+    #[test]
+    fn possibly_expired_sgids_find_users_like_rails() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../vectors/rails_compat.json");
+        let vectors: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect(path)).unwrap();
+        let ctx = RenderContext { resolver: &VectorRecords, request_host: None };
+        for case in vectors["unverified_sgids"].as_array().unwrap() {
+            let label = &case["case"];
+            let found = attachable_from_possibly_expired_sgid(case["sgid"].as_str(), &ctx).map(|user| user.map(|user| user.id));
+            match &case["expected"] {
+                serde_json::Value::Null => assert_eq!(found, Ok(None), "{label}"),
+                serde_json::Value::String(gid) => {
+                    let id = gid.rsplit('/').next().unwrap().parse().unwrap();
+                    assert_eq!(found, Ok(Some(id)), "{label}");
+                }
+                raises => assert!(found.is_err(), "{label} should raise like Rails ({raises})"),
+            }
+        }
+    }
 }

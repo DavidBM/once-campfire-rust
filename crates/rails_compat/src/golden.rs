@@ -192,31 +192,10 @@ fn sgids() {
 }
 
 #[test]
-fn unverified_sgids_only_yield_users() {
-    let existing_user_ids = ["1", "2"];
-    for case in cases("unverified_sgids") {
-        let result = global_id::unverified_attachable_user(opt_str(&case["sgid"]));
-        // Rails also looks the user up; a missing one is nil.
-        let found = result.clone().map(|gid| gid.filter(|gid| existing_user_ids.contains(&gid.id.as_str())));
-        match &case["expected"] {
-            Value::Null => assert_eq!(found, Ok(None), "{}", label(case)),
-            Value::String(gid) => {
-                let expected = GlobalId::parse(gid).unwrap();
-                let found = found.unwrap().unwrap_or_else(|| panic!("{} found nothing", label(case)));
-                assert_eq!((found.model_name, found.id), (expected.model_name, expected.id), "{}", label(case));
-            }
-            raises => assert!(result.is_err(), "{} should fail like Rails ({raises})", label(case)),
-        }
-    }
-}
-
-#[test]
-fn tampered_sgids_for_other_models_are_rejected() {
-    // Independent of the oracle: the signature-ignoring fallback must never yield a non-User.
-    for model in ["Rooms::Open", "Account", "Message", "Rooms::Direct", "Session"] {
+fn forged_sgids_are_rejected() {
+    for model in ["User", "Rooms::Open", "Account", "Message", "Rooms::Direct", "Session"] {
         let gid = GlobalId::new(model, 1);
         let forged = global_id::verifier(&Secrets::new("attacker")).generate(&Value::String(gid.to_string()), Some("attachable"), None);
-        assert_eq!(global_id::unverified_attachable_user(Some(&forged)), Ok(None));
         assert_eq!(global_id::locate_signed(&SECRETS, &forged, "attachable", now()), None);
     }
 }

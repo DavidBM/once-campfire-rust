@@ -1,5 +1,4 @@
-//! GlobalID / SignedGlobalID (`gid://campfire/User/1`, `user.attachable_sgid`), including the
-//! signature-ignoring fallback for User mentions in `lib/rails_ext/action_text_attachables.rb`.
+//! GlobalID / SignedGlobalID (`gid://campfire/User/1`, `user.attachable_sgid`).
 //!
 //! SGIDs are signed by `GlobalID::Verifier` (key `generate_key("signed_global_ids")`, HMAC-SHA1,
 //! URL-safe Base64 *with* padding, the app's `:json_allow_marshal` serializer, and the
@@ -11,7 +10,7 @@ use jiff::Timestamp;
 use serde_json::Value;
 
 use crate::message_verifier::{Digest, Encoding, MessageVerifier, Serializer};
-use crate::{Secrets, encoding, json};
+use crate::{Secrets, encoding};
 
 pub const SALT: &str = "signed_global_ids";
 /// `GlobalID.app`, from the application name (`Campfire::Application`).
@@ -105,88 +104,6 @@ fn verify_with_legacy_self_validated_metadata(verifier: &MessageVerifier, sgid: 
 pub fn verifier(secrets: &Secrets) -> MessageVerifier {
     let secret = secrets.key_generator.generate_key(SALT, 64);
     MessageVerifier::new(secret, Digest::Sha1, Encoding::UrlSafePadded, Serializer::JsonWithFallback { allow_marshal: true })
-}
-
-/// Why `attachable_from_possibly_expired_sgid` would raise in Rails (it only rescues
-/// `RecordNotFound`), which makes rendering the rich text fail.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum UnverifiedSgidError {
-    #[error("invalid base64")]
-    InvalidBase64,
-    #[error("invalid JSON")]
-    InvalidJson,
-    #[error("unexpected JSON structure")]
-    UnexpectedStructure,
-}
-
-/// `ActionText::Attachment.attachable_from_possibly_expired_sgid` from
-/// `lib/rails_ext/action_text_attachables.rb`: reads the GID out of an SGID **without checking
-/// the signature, purpose or expiry**, so mentions survive a `SECRET_KEY_BASE` rotation. Only
-/// `User` GIDs come back. Rails-7-era Marshal payloads are handled by pattern-matching the
-/// `gid://campfire/<Model>/<digits>` bytes, never by unmarshaling.
-///
-/// `Ok(Some(gid))` means Rails would use the User with `gid.id` *if it exists* (the caller
-/// looks it up; a missing user is `nil`). Like `GlobalID.find`, the GID's app isn't checked in
-/// the JSON form. `Err` is where Rails raises instead of returning nil.
-pub fn unverified_attachable_user(sgid: Option<&str>) -> Result<Option<GlobalId>, UnverifiedSgidError> {
-    // `sgid&.split("--")&.first`: nil for nil or "", but "" (then a JSON error) for "--x".
-    let Some(message) = sgid.filter(|s| !s.is_empty()).and_then(|s| s.split("--").next()) else { return Ok(None) };
-    let decoded = decode_base64(message)?;
-    let parsed = json::parse(&decoded).ok_or(UnverifiedSgidError::InvalidJson)?;
-
-    let decoded_gid = match dig_rails(&parsed)? {
-        Some(rails) if truthy(rails.get("data")) => match rails.get("data") {
-            Some(Value::String(data)) => Some(data.clone()),
-            _ => None,
-        },
-        Some(rails) if truthy(rails.get("message")) => {
-            let data = rails.get("message").and_then(Value::as_str).ok_or(UnverifiedSgidError::UnexpectedStructure)?;
-            find_marshaled_gid(&decode_base64(data)?)
-        }
-        _ => None,
-    };
-
-    Ok(decoded_gid.as_deref().and_then(GlobalId::parse).filter(|gid| gid.model_name == "User"))
-}
-
-/// `encoded_message.dig("_rails", ...)`: `Hash#dig` raises on anything that isn't a Hash or nil.
-fn dig_rails(parsed: &Value) -> Result<Option<&serde_json::Map<String, Value>>, UnverifiedSgidError> {
-    match parsed {
-        Value::Object(hash) => match hash.get("_rails") {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::Object(rails)) => Ok(Some(rails)),
-            Some(_) => Err(UnverifiedSgidError::UnexpectedStructure),
-        },
-        _ => Err(UnverifiedSgidError::UnexpectedStructure),
-    }
-}
-
-fn truthy(value: Option<&Value>) -> bool {
-    !matches!(value, None | Some(Value::Null) | Some(Value::Bool(false)))
-}
-
-/// `Base64.strict_decode64(message) rescue Base64.urlsafe_decode64(message)`.
-fn decode_base64(message: &str) -> Result<Vec<u8>, UnverifiedSgidError> {
-    encoding::strict_decode(message).or_else(|| encoding::urlsafe_decode(message)).ok_or(UnverifiedSgidError::InvalidBase64)
-}
-
-/// `decode_base64(data).match(%r{(gid://campfire/[^/]+/\d+)})` over the raw bytes of a Marshal
-/// dump, which is deliberately never loaded.
-fn find_marshaled_gid(bytes: &[u8]) -> Option<String> {
-    const PREFIX: &[u8] = b"gid://campfire/";
-    (0..bytes.len()).find_map(|start| {
-        let rest = bytes[start..].strip_prefix(PREFIX)?;
-        let model_length = rest.iter().position(|&b| b == b'/')?;
-        if model_length == 0 {
-            return None;
-        }
-        let digits = rest[model_length + 1..].iter().take_while(|b| b.is_ascii_digit()).count();
-        if digits == 0 {
-            return None;
-        }
-        let end = start + PREFIX.len() + model_length + 1 + digits;
-        Some(String::from_utf8_lossy(&bytes[start..end]).into_owned())
-    })
 }
 
 #[cfg(test)]
