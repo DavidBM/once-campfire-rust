@@ -19,7 +19,7 @@ use campfire_db::{CachedStatements, Connection, Event, Tx};
 use campfire_kit::{Error, Param, Result, UploadedFile};
 use campfire_storage::{Blob, Filename, Staged, Variation};
 
-use crate::active_storage::{analyzed_metadata, keep_after_commit, stage_file};
+use crate::active_storage::{analyzed_metadata, keep_after_commit, stage_file, storage_error};
 use crate::app::App;
 
 /// An uploaded file (`ActionDispatch::Http::UploadedFile`), still in its multipart tempfile.
@@ -199,8 +199,4 @@ pub async fn processed_variant(app: &App, record: Record, name: &str, transforma
     let blob = app.db.read(move |conn| attached_blob(conn, record.record_type, record.id, &name)).await.map_err(Error::internal)?;
     let Some(blob) = blob.filter(Blob::is_variable) else { return Ok(None) };
     crate::active_storage::processed_representation(app, blob, transformations).await.map(Some)
-}
-
-pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
-    campfire_db::Error::other(error)
 }

@@ -302,7 +302,7 @@ fn send_blob_byte_range_data(c: &mut Ctx, blob: &Blob, range: &str) -> Result {
     };
     let path = storage.path_for(blob);
     if !path.is_file() {
-        return Err(storage_error_to_kit(campfire_storage::Error::FileNotFound));
+        return Err(Error::internal(campfire_storage::Error::FileNotFound));
     }
     let content_type_for_serving = content_types::for_serving(blob.content_type()).to_string();
     let (content_type, parts, content_range) = if let [(start, end)] = ranges[..] {
@@ -623,15 +623,14 @@ fn query_ids(conn: &rusqlite::Connection, sql: &str, id: i64) -> campfire_db::Re
     Ok(ids)
 }
 
-fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
+/// A storage error inside a database closure. SQLite's own errors stay `Error::Sqlite`, so that
+/// `is_record_not_unique` sees them. (Neither crate depends on the other, so this can't be a
+/// `From` impl.)
+pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
     match error {
         campfire_storage::Error::Sql(error) => error.into(),
         other => campfire_db::Error::other(other),
     }
-}
-
-fn storage_error_to_kit(error: campfire_storage::Error) -> Error {
-    Error::internal(error)
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -643,6 +642,17 @@ fn random_hex(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A unique index refusing a blob or attachment row inside `User.create!` is rescued as
+    /// `ActiveRecord::RecordNotUnique`, like the user row's own.
+    #[test]
+    fn storage_errors_keep_sqlites_own() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE blobs (key TEXT UNIQUE); INSERT INTO blobs VALUES ('a')").unwrap();
+        let unique = conn.execute("INSERT INTO blobs VALUES ('a')", []).unwrap_err();
+        assert!(storage_error(campfire_storage::Error::Sql(unique)).is_record_not_unique());
+        assert!(matches!(storage_error(campfire_storage::Error::FileNotFound), campfire_db::Error::Other(_)));
+    }
 
     #[tokio::test]
     async fn byte_ranges_are_not_read_into_memory() {

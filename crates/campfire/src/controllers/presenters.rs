@@ -29,6 +29,7 @@ use campfire_views::rooms::{RoomView, room_display_name};
 use rails_compat::Secrets;
 use regex::Regex;
 
+use crate::active_storage::storage_error;
 use crate::app::AppState;
 
 pub use rich_text::DbResolver;
@@ -453,10 +454,6 @@ fn dimension(blob: &campfire_storage::Blob, name: &str) -> Option<RubyNumber> {
         campfire_storage::Json::Float(value) => Some(RubyNumber::Float(*value)),
         _ => None,
     }
-}
-
-pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
-    campfire_db::Error::other(error)
 }
 
 #[cfg(test)]
