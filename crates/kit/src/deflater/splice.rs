@@ -38,8 +38,10 @@ const MIN_WHOLE_PAGE: usize = 1024;
 const MAX_GLUE: usize = 256;
 /// Deflate's window.
 const WINDOW: usize = 32 * 1024;
-/// A bound on remembered fragments (a 32 MB fragment cache holds a few thousand messages).
-const MAX_FRAGMENTS: usize = 8 * 1024;
+/// A bound on what remembered fragments cost, their pieces included. A message's fragment is ~10 KB
+/// and its pieces (one for each predecessor it's seen after, usually one or two) ~1 KB each, so
+/// the ~3,300 messages a 32 MB fragment cache holds take ~7 MB, well within a generation.
+const MAX_FRAGMENT_BYTES: usize = 32 << 20;
 /// Pieces kept per fragment, for the predecessors it's seen with: a message follows the same one in
 /// its room and on a page of older messages, and other ones in search results.
 const PIECES_PER_FRAGMENT: usize = 4;
@@ -198,7 +200,7 @@ impl PageParts {
             std::iter::once((Before::Nothing, &b""[..])).chain(self.parts.iter().map(|part| part.as_before(body))).collect();
         // Only look up under the locks; compressing happens outside them.
         let stored: Vec<Option<Bytes>> = {
-            let fragments = lock(&FRAGMENTS);
+            let mut fragments = lock(&FRAGMENTS);
             let mut texts = lock(&TEXT_PIECES);
             self.parts
                 .iter()
@@ -207,7 +209,7 @@ impl PageParts {
                     Part::Text { sha, .. } => texts.get(&(*sha, *before), Bytes::clone),
                     Part::Fragment { fragment, glue, range, .. } => {
                         let glue = &body[range.start..range.start + glue];
-                        fragments.get(&fragment_key(fragment)).and_then(|known| known.piece_after(*before, glue))
+                        fragments.get(&fragment_key(fragment), |known| known.piece_after(*before, glue)).flatten()
                     }
                 })
                 .collect()
@@ -240,9 +242,7 @@ impl PageParts {
         if !new_fragments.is_empty() {
             let mut fragments = lock(&FRAGMENTS);
             for (fragment, piece) in new_fragments {
-                if let Some(known) = fragments.get_mut(&fragment_key(&fragment)) {
-                    known.store(piece);
-                }
+                fragments.update(&fragment_key(&fragment), |known| known.store(piece));
             }
         }
         pieces
@@ -343,7 +343,7 @@ fn compress(dictionary: &[u8], text: &[u8]) -> Bytes {
 /// recently stored last.
 struct KnownFragment {
     /// Keeps the fragment's address from being reused while the entry exists.
-    fragment: Weak<String>,
+    _pin: Weak<String>,
     sha: Sha,
     pieces: Vec<Arc<FragmentPiece>>,
 }
@@ -366,6 +366,27 @@ impl KnownFragment {
             self.pieces.remove(0);
         }
         self.pieces.push(Arc::new(piece));
+    }
+
+    /// What the entry holds: itself, and its pieces with their glue.
+    fn cost(&self) -> usize {
+        ENTRY_OVERHEAD + self.pieces.iter().map(|piece| piece.deflated.len() + piece.glue.len() + ENTRY_OVERHEAD).sum::<usize>()
+    }
+}
+
+/// Known fragments by the address of their `Arc`: while an entry exists, its `_pin` keeps the
+/// address from being reused, so the entry at an address is that fragment's.
+type KnownFragments = Generations<usize, KnownFragment>;
+
+impl KnownFragments {
+    /// `fragment`'s SHA-256, hashing (and remembering) it the first time it's seen.
+    fn sha(&mut self, fragment: &Arc<String>) -> Sha {
+        let key = fragment_key(fragment);
+        self.get(&key, |known| known.sha).unwrap_or_else(|| {
+            let sha = Sha256::digest(fragment.as_bytes()).into();
+            self.insert(key, KnownFragment { _pin: Arc::downgrade(fragment), sha, pieces: Vec::new() });
+            sha
+        })
     }
 }
 
@@ -413,6 +434,24 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> Generations<K, V, S> {
                 entry.insert(value);
             }
         }
+        self.rotate_when_full();
+    }
+
+    /// Changes the entry for `key`, if there is one, promoting it if it's old and counting what it
+    /// costs now.
+    fn update(&mut self, key: &K, change: impl FnOnce(&mut V)) {
+        if let Some(value) = self.young.get_mut(key) {
+            let before = (self.cost)(key, value);
+            change(value);
+            self.young_cost = self.young_cost - before + (self.cost)(key, value);
+            self.rotate_when_full();
+        } else if let Some((key, mut value)) = self.old.remove_entry(key) {
+            change(&mut value);
+            self.insert(key, value);
+        }
+    }
+
+    fn rotate_when_full(&mut self) {
         if self.young_cost > self.budget / 2 {
             self.old = std::mem::take(&mut self.young);
             self.young_cost = 0;
@@ -420,7 +459,8 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> Generations<K, V, S> {
     }
 }
 
-static FRAGMENTS: LazyLock<Mutex<HashMap<usize, KnownFragment>>> = LazyLock::new(Mutex::default);
+static FRAGMENTS: LazyLock<Mutex<KnownFragments>> =
+    LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_FRAGMENT_BYTES, |_, known| known.cost())));
 static TEXT_PIECES: LazyLock<Mutex<Generations<(Sha, Before), Bytes>>> =
     LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_PIECE_BYTES, |_, piece| piece.len() + ENTRY_OVERHEAD)));
 static TEXT_SHAS: LazyLock<Mutex<Generations<Box<[u8]>, Sha>>> =
@@ -434,29 +474,10 @@ fn fragment_key(fragment: &Arc<String>) -> usize {
     Arc::as_ptr(fragment) as usize
 }
 
-/// Each fragment's SHA-256, hashing (and remembering) the ones not seen before. A remembered
-/// entry at the same address is the same fragment while its `Weak` keeps the address taken.
-fn fragment_shas<'a>(fragments: impl Iterator<Item = &'a Arc<String>> + Clone) -> Vec<Sha> {
+/// Each fragment's SHA-256, hashing (and remembering) the ones not seen before.
+fn fragment_shas<'a>(fragments: impl Iterator<Item = &'a Arc<String>>) -> Vec<Sha> {
     let mut known = lock(&FRAGMENTS);
-    let missing = fragments.clone().filter(|f| !known.contains_key(&fragment_key(f))).count();
-    if known.len() + missing > MAX_FRAGMENTS {
-        known.retain(|_, entry| entry.fragment.strong_count() > 0);
-        if known.len() + missing > MAX_FRAGMENTS {
-            known.clear();
-        }
-    }
-    fragments
-        .map(|fragment| {
-            known
-                .entry(fragment_key(fragment))
-                .or_insert_with(|| KnownFragment {
-                    fragment: Arc::downgrade(fragment),
-                    sha: Sha256::digest(fragment.as_bytes()).into(),
-                    pieces: Vec::new(),
-                })
-                .sha
-        })
-        .collect()
+    fragments.map(|fragment| known.sha(fragment)).collect()
 }
 
 #[cfg(test)]
@@ -488,6 +509,10 @@ mod tests {
         PageParts::new(body.as_bytes(), fragments).expect("fragments in the body").gzip(body.as_bytes(), 0)
     }
 
+    fn stored_pieces(fragment: &Arc<String>) -> Vec<Arc<FragmentPiece>> {
+        lock(&FRAGMENTS).get(&fragment_key(fragment), |known| known.pieces.clone()).expect("a known fragment")
+    }
+
     #[test]
     fn a_page_without_fragments_is_one_stored_piece() {
         let body = format!("<html><body>{}</body></html>", "<li>sidebar room</li>".repeat(200));
@@ -509,13 +534,13 @@ mod tests {
         assert_eq!(gunzip(&gz), body.as_bytes());
         assert_eq!(&gz[4..8], &1234u32.to_le_bytes());
         assert_eq!(gz[9], 3);
-        let piece = lock(&FRAGMENTS)[&fragment_key(&messages[5])].pieces[0].clone();
+        let piece = stored_pieces(&messages[5])[0].clone();
         assert_eq!(
             PageParts::new(body.as_bytes(), &messages).unwrap().gzip(body.as_bytes(), 1234),
             gz,
             "the same page is the same stored pieces"
         );
-        assert!(Arc::ptr_eq(&piece, &lock(&FRAGMENTS)[&fragment_key(&messages[5])].pieces[0]));
+        assert!(Arc::ptr_eq(&piece, &stored_pieces(&messages[5])[0]));
     }
 
     #[test]
@@ -590,12 +615,11 @@ mod tests {
         for body in [&room, &search] {
             gzip(body, if std::ptr::eq(body, &room) { &messages } else { &search_hits });
         }
-        let pieces = |fragment: &Arc<String>| lock(&FRAGMENTS)[&fragment_key(fragment)].pieces.clone();
-        let before = pieces(&messages[5]);
+        let before = stored_pieces(&messages[5]);
         assert_eq!(before.len(), 2, "one after message 604, one after 601");
         gzip(&room, &messages);
         gzip(&search, &search_hits);
-        let after = pieces(&messages[5]);
+        let after = stored_pieces(&messages[5]);
         assert!(before.iter().zip(&after).all(|(a, b)| Arc::ptr_eq(a, b)), "both pages reuse theirs");
     }
 
@@ -604,14 +628,52 @@ mod tests {
         let messages: Vec<_> = (800..803).map(message).collect();
         let body = page("<p>", &messages, "</p>");
         gzip(&body, &messages);
-        let pieces = |fragment: &Arc<String>| lock(&FRAGMENTS)[&fragment_key(fragment)].pieces.clone();
-        let stored = pieces(&messages[1]);
+        let stored = stored_pieces(&messages[1]);
         // The first message rendered again into a new `Arc`, with the same bytes.
         let rerendered = vec![Arc::new(messages[0].to_string()), messages[1].clone(), messages[2].clone()];
         assert_eq!(gunzip(&gzip(&body, &rerendered)), body.as_bytes());
-        let after = pieces(&messages[1]);
+        let after = stored_pieces(&messages[1]);
         assert_eq!(after.len(), 1, "no second piece for the same predecessor");
         assert!(Arc::ptr_eq(&stored[0], &after[0]), "the piece after it is reused");
+    }
+
+    #[test]
+    fn fragments_a_page_keeps_showing_stay_while_the_rest_age_out() {
+        fn remember(known: &mut KnownFragments, fragment: &Arc<String>) {
+            known.sha(fragment);
+            let piece = FragmentPiece { before: Before::Nothing, glue: Box::default(), deflated: Bytes::from(vec![0; 1000]) };
+            known.update(&fragment_key(fragment), |entry| entry.store(piece));
+        }
+        fn pieces(known: &mut KnownFragments, fragment: &Arc<String>) -> Option<Vec<Arc<FragmentPiece>>> {
+            known.get(&fragment_key(fragment), |entry| entry.pieces.clone())
+        }
+
+        // Room for a few dozen fragments, where the old bound only cleared them all at once.
+        let budget = 64 * 1024;
+        let mut known: KnownFragments = Generations::with_budget(budget, |_, entry| entry.cost());
+        let page: Vec<_> = (900..903).map(message).collect();
+        for fragment in &page {
+            remember(&mut known, fragment);
+        }
+        let stored: Vec<_> = page.iter().map(|fragment| pieces(&mut known, fragment).unwrap()).collect();
+        let others: Vec<_> = (1_000..1_300).map(message).collect();
+        for (n, fragment) in others.iter().enumerate() {
+            remember(&mut known, fragment);
+            if n % 10 == 0 {
+                // The page, shown again.
+                for fragment in &page {
+                    known.sha(fragment);
+                }
+            }
+            let held: usize = known.young.values().chain(known.old.values()).map(KnownFragment::cost).sum();
+            // Each generation may overshoot half the budget by the entry that filled it.
+            assert!(held <= budget + 2 * 2048, "{held} bytes held");
+        }
+        for (fragment, stored) in page.iter().zip(&stored) {
+            let now = pieces(&mut known, fragment).expect("still known");
+            assert!(Arc::ptr_eq(&stored[0], &now[0]), "with the same piece");
+        }
+        assert!(pieces(&mut known, &others[0]).is_none(), "one not seen again ages out");
     }
 
     #[test]
