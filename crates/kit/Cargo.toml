@@ -48,6 +48,12 @@ p256 = { workspace = true, features = ["pkcs8", "pem"] }
 libc.workspace = true
 hex.workspace = true
 
+# sha2 0.10 compiles its ARMv8 SHA-256 backend (used when the CPU has the instructions) only with
+# `asm`; without it the arm64 image hashes every page body in software. Features unify, so this
+# covers every sha2 user in the app. x86_64 detects SHA-NI without it.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2 = { workspace = true, features = ["asm"] }
+
 [dev-dependencies]
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 # tests/front.rs: a WebSocket backend behind the front server
