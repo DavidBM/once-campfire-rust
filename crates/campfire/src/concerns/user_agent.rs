@@ -21,14 +21,12 @@ const DEFAULT_USER_AGENT: &str = "Mozilla/4.0 (compatible)";
 
 /// `UserAgent.parse`: blank strings parse as "Mozilla/4.0 (compatible)".
 pub fn parse(user_agent: &str) -> Agent {
-    let mut rest: Vec<char> =
-        if ruby_compat::strip(user_agent).is_empty() { DEFAULT_USER_AGENT.chars().collect() } else { user_agent.chars().collect() };
+    let mut rest = if ruby_compat::strip(user_agent).is_empty() { DEFAULT_USER_AGENT } else { user_agent };
 
     let mut products = Vec::new();
-    while let Some((length, product)) = match_product(&rest) {
+    while let Some((length, product)) = match_product(rest) {
         products.push(product);
-        let tail: String = rest[length..].iter().collect();
-        rest = ruby_compat::strip(&tail).chars().collect();
+        rest = ruby_compat::strip(&rest[length..]);
     }
 
     let kind = Kind::ALL.into_iter().find(|kind| kind.extends(&products)).unwrap_or(Kind::Base);
@@ -218,12 +216,18 @@ pub(crate) fn is_present(string: &str) -> bool {
 }
 
 /// `UserAgent::MATCHER` applied at the start of `s`:
-/// `^['"]*([^/\s]+)/?([^\s,]*)(\s\(([^\)]*)\)|,gzip\(gfe\))?`. Returns the match length in chars.
-fn match_product(s: &[char]) -> Option<(usize, Product)> {
-    let is_product_char = |c: char| c != '/' && !is_ruby_space(c);
-    let quotes = s.iter().take_while(|&&c| c == '\'' || c == '"').count();
+/// `^['"]*([^/\s]+)/?([^\s,]*)(\s\(([^\)]*)\)|,gzip\(gfe\))?`. Returns the match length in bytes.
+///
+/// It scans bytes. Every delimiter the pattern names is ASCII, and every byte of a multibyte
+/// character is 0x80 or above, which the product, version and comment classes all accept, so each
+/// scan stops on a character boundary (even when `start + 1` lands inside the first character).
+fn match_product(s: &str) -> Option<(usize, Product)> {
+    let bytes = s.as_bytes();
+    let is_space = |b: u8| is_ruby_space(b as char);
+    let is_product_byte = |b: u8| b != b'/' && !is_space(b);
+    let quotes = run(bytes, |b| b == b'\'' || b == b'"');
 
-    let start = if quotes < s.len() && is_product_char(s[quotes]) {
+    let start = if bytes.get(quotes).is_some_and(|&b| is_product_byte(b)) {
         quotes
     } else if quotes > 0 {
         quotes - 1 // backtrack: the last quote is the product
@@ -232,31 +236,28 @@ fn match_product(s: &[char]) -> Option<(usize, Product)> {
     };
 
     let mut i = start + 1;
-    while i < s.len() && is_product_char(s[i]) {
-        i += 1;
-    }
-    let product: String = s[start..i].iter().collect();
+    i += run(&bytes[i..], is_product_byte);
+    let product = &s[start..i];
 
-    if i < s.len() && s[i] == '/' {
+    if bytes.get(i) == Some(&b'/') {
         i += 1;
     }
     let version_start = i;
-    while i < s.len() && !is_ruby_space(s[i]) && s[i] != ',' {
-        i += 1;
-    }
-    let version: String = s[version_start..i].iter().collect();
+    i += run(&bytes[i..], |b| !is_space(b) && b != b',');
+    let version = &s[version_start..i];
 
     let mut comment = None;
-    if i + 1 < s.len() && is_ruby_space(s[i]) && s[i + 1] == '(' {
-        if let Some(close) = s[i + 2..].iter().position(|&c| c == ')') {
-            comment = Some(s[i + 2..i + 2 + close].iter().collect::<String>());
+    if bytes.get(i).is_some_and(|&b| is_space(b)) && bytes.get(i + 1) == Some(&b'(') {
+        if let Some(close) = bytes[i + 2..].iter().position(|&b| b == b')') {
+            comment = Some(&s[i + 2..i + 2 + close]);
             i += 2 + close + 1;
         }
-    } else if s[i..].iter().copied().take(10).eq(",gzip(gfe)".chars()) {
-        i += 10;
+    } else if bytes[i..].starts_with(b",gzip(gfe)") {
+        i += ",gzip(gfe)".len();
     }
 
-    let product = Product { product, version: Version::new(&version), comment: comment.map(|comment| ruby_split(&comment, "; ")) };
+    let product =
+        Product { product: product.to_string(), version: Version::new(version), comment: comment.map(|comment| ruby_split(comment, "; ")) };
     Some((i, product))
 }
 
@@ -1045,6 +1046,9 @@ fn webkit_build_version(build: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
+pub(crate) mod corpus;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use serde_json::{Value, json};
@@ -1126,5 +1130,91 @@ pub(crate) mod tests {
         let agent = parse("  ");
         assert_eq!(agent.browser(), "Mozilla");
         assert_eq!(agent.version().to_string(), "4.0");
+    }
+
+    /// Every User-Agent the tests know: the gem vectors' and the real-world corpus.
+    pub(crate) fn user_agents() -> Vec<Option<String>> {
+        let vectors = vectors();
+        let mut user_agents: Vec<Option<String>> =
+            vectors["user_agents"].as_array().unwrap().iter().map(|case| case["ua"].as_str().map(String::from)).collect();
+        user_agents.extend(corpus::USER_AGENTS.iter().map(|ua| Some(ua.to_string())));
+        user_agents
+    }
+
+    /// The straightforward code the fast paths replaced, kept to check them against.
+    mod straightforward {
+        use super::super::{Product, Version, is_ruby_space, ruby_split};
+
+        /// `parse`'s product loop over chars, collecting the stripped rest after each product.
+        pub fn products(user_agent: &str) -> Vec<Product> {
+            let default = "Mozilla/4.0 (compatible)";
+            let mut rest: Vec<char> =
+                if ruby_compat::strip(user_agent).is_empty() { default.chars().collect() } else { user_agent.chars().collect() };
+            let mut products = Vec::new();
+            while let Some((length, product)) = match_product(&rest) {
+                products.push(product);
+                let tail: String = rest[length..].iter().collect();
+                rest = ruby_compat::strip(&tail).chars().collect();
+            }
+            products
+        }
+
+        fn match_product(s: &[char]) -> Option<(usize, Product)> {
+            let is_product_char = |c: char| c != '/' && !is_ruby_space(c);
+            let quotes = s.iter().take_while(|&&c| c == '\'' || c == '"').count();
+
+            let start = if quotes < s.len() && is_product_char(s[quotes]) {
+                quotes
+            } else if quotes > 0 {
+                quotes - 1
+            } else {
+                return None;
+            };
+
+            let mut i = start + 1;
+            while i < s.len() && is_product_char(s[i]) {
+                i += 1;
+            }
+            let product: String = s[start..i].iter().collect();
+
+            if i < s.len() && s[i] == '/' {
+                i += 1;
+            }
+            let version_start = i;
+            while i < s.len() && !is_ruby_space(s[i]) && s[i] != ',' {
+                i += 1;
+            }
+            let version: String = s[version_start..i].iter().collect();
+
+            let mut comment = None;
+            if i + 1 < s.len() && is_ruby_space(s[i]) && s[i + 1] == '(' {
+                if let Some(close) = s[i + 2..].iter().position(|&c| c == ')') {
+                    comment = Some(s[i + 2..i + 2 + close].iter().collect::<String>());
+                    i += 2 + close + 1;
+                }
+            } else if s[i..].iter().copied().take(10).eq(",gzip(gfe)".chars()) {
+                i += 10;
+            }
+
+            let product = Product { product, version: Version::new(&version), comment: comment.map(|comment| ruby_split(&comment, "; ")) };
+            Some((i, product))
+        }
+    }
+
+    fn fields(product: &Product) -> (&str, &str, Option<&[String]>) {
+        (&product.product, product.version.as_str(), product.comment.as_deref())
+    }
+
+    /// Each User-Agent, and each of its prefixes (the truncated and unterminated shapes).
+    #[test]
+    fn scans_products_like_the_char_by_char_matcher() {
+        for user_agent in user_agents() {
+            let user_agent = user_agent.unwrap_or_default();
+            let prefixes = user_agent.char_indices().map(|(i, _)| &user_agent[..i]).chain([user_agent.as_str()]);
+            for prefix in prefixes {
+                let (fast, slow) = (parse(prefix).products, straightforward::products(prefix));
+                assert_eq!(fast.iter().map(fields).collect::<Vec<_>>(), slow.iter().map(fields).collect::<Vec<_>>(), "{prefix:?}");
+            }
+        }
     }
 }
