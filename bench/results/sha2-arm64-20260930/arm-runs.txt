@@ -1,0 +1,45 @@
+# crates/kit/examples/sha256_bench.rs on GitHub's ubuntu-24.04-arm runner (4 x Neoverse-N2, image
+# ubuntu24-arm64/20260920.129), run 36683019792, 2026-09-30, at a6f58f1 with rustc 1.98.1.
+# software: --features sha2/force-soft (what arm64 ran before); armv8: the default build (asm).
+== software 1
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 324ns per hash (0.20 GB/s), range 324ns..325ns
+message fragment (1024 B): median 2.624µs per hash (0.39 GB/s), range 2.624µs..2.629µs
+room page text (34816 B): median 83.308µs per hash (0.42 GB/s), range 83.297µs..83.498µs
+whole room page (425984 B): median 1.017627ms per hash (0.42 GB/s), range 1.017312ms..1.019353ms
+== armv8 1
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 72ns per hash (0.89 GB/s), range 72ns..72ns
+message fragment (1024 B): median 594ns per hash (1.72 GB/s), range 594ns..594ns
+room page text (34816 B): median 18.641µs per hash (1.87 GB/s), range 18.639µs..18.651µs
+whole room page (425984 B): median 227.721µs per hash (1.87 GB/s), range 227.684µs..228.833µs
+== software 2
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 324ns per hash (0.20 GB/s), range 324ns..324ns
+message fragment (1024 B): median 2.623µs per hash (0.39 GB/s), range 2.623µs..2.624µs
+room page text (34816 B): median 83.311µs per hash (0.42 GB/s), range 83.304µs..83.423µs
+whole room page (425984 B): median 1.017521ms per hash (0.42 GB/s), range 1.017393ms..1.01816ms
+== armv8 2
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 73ns per hash (0.88 GB/s), range 73ns..73ns
+message fragment (1024 B): median 594ns per hash (1.72 GB/s), range 594ns..594ns
+room page text (34816 B): median 18.642µs per hash (1.87 GB/s), range 18.639µs..18.655µs
+whole room page (425984 B): median 227.649µs per hash (1.87 GB/s), range 227.613µs..227.795µs
+== software 3
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 324ns per hash (0.20 GB/s), range 324ns..324ns
+message fragment (1024 B): median 2.623µs per hash (0.39 GB/s), range 2.623µs..2.624µs
+room page text (34816 B): median 83.309µs per hash (0.42 GB/s), range 83.302µs..83.368µs
+whole room page (425984 B): median 1.017377ms per hash (0.42 GB/s), range 1.017257ms..1.01781ms
+== armv8 3
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 74ns per hash (0.86 GB/s), range 74ns..74ns
+message fragment (1024 B): median 594ns per hash (1.72 GB/s), range 594ns..595ns
+room page text (34816 B): median 18.644µs per hash (1.87 GB/s), range 18.639µs..18.648µs
+whole room page (425984 B): median 227.692µs per hash (1.87 GB/s), range 227.552µs..227.911µs

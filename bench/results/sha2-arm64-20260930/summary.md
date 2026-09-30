@@ -17,33 +17,31 @@ it.
   entry (its one dependency, `cc`, was already there), which only aarch64 builds compile.
 - The digests are the same, so nothing stored or signed changes.
 
-## On ARM: still to be measured
+## On ARM
 
-This host has no ARM CPU, and the numbers that decide this change have to come from one (the
-`ubuntu-24.04-arm` runner the publish workflow uses, a Raspberry Pi 5, or a Graviton instance). At
-`62394bb` or later, three interleaved rounds of:
+Measured on GitHub's `ubuntu-24.04-arm` runner: 4 Neoverse-N2 cores (Azure Cobalt 100), which have
+the SHA-256 instructions. The job was one run of a throwaway workflow at `a6f58f1`
+(run 36683019792). It ran three interleaved rounds of:
 
     cargo run --release -p campfire_kit --example sha256_bench --features sha2/force-soft   # before
     cargo run --release -p campfire_kit --example sha256_bench                              # after
 
-`force-soft` selects exactly the code aarch64 ran before (`soft::compress`, what sha2 uses there
-without `asm`). Both must print the same "digest of every length to 2 KB" line, and the after run's
-first line should say the CPU has the SHA-256 instructions: Graviton, the Cobalt 100 behind GitHub's
-arm runners and the Pi 5's Cortex-A76 have them; a Pi 4 doesn't, and keeps the software rounds at
-runtime. Then once, on the same machine:
-
-    CAMPFIRE_REQUIRE_SEED=1 cargo test --workspace --exclude html5ever
-
-(with a seed from `parity/bin/seed build`, or a copy of another machine's `parity/.seed`), or build
-the arm64 image. Put the medians of the
-three rounds in the table below. Until then this change is unmeasured on the hardware it's for.
+`force-soft` selects exactly the code aarch64 ran before: `soft::compress`, which sha2 uses there
+without `asm`. Both builds printed the same "digest of every length to 2 KB" line
+(`60a76f1a…664f58a14`, the same as on x86_64). Medians of the three rounds (every round was within
+2 ns or 0.2% of these); the raw output is in [`arm-runs.txt`](arm-runs.txt).
 
 | Size | Software (before) | ARMv8 SHA-256 (after) | Ratio |
 |---|---|---|---|
-| cookie HMAC input (64 B) | | | |
-| message fragment (1 KB) | | | |
-| room page text (34 KB) | | | |
-| whole room page (416 KB) | | | |
+| cookie HMAC input (64 B) | 324 ns | 73 ns | 4.4× |
+| message fragment (1 KB) | 2.62 µs | 594 ns | 4.4× |
+| room page text (34 KB) | 83.3 µs | 18.6 µs | 4.5× |
+| whole room page (416 KB) | 1.018 ms | 228 µs | 4.5× |
+
+On x86_64, the room page's text parts took 6.66% of room_show's CPU with SHA-NI
+(`profile-20260929`). In software, the same hashing costs arm64 about 4.5 times as much. The
+page-parts change on `perf-splice` stops hashing text parts on every request; ETags, cookie HMACs
+and new fragments still hash.
 
 ## x86_64 as a proxy
 
@@ -59,8 +57,7 @@ the three rounds; raw output in [`runs.txt`](runs.txt).
 | room page text (34 KB) | 58.0 µs | 14.1 µs | 4.1× |
 | whole room page (416 KB) | 705 µs | 172 µs | 4.1× |
 
-How much ARM's instructions gain over its software rounds, and how much of a request that is,
-depends on the core, which is why the table above needs filling in.
+The ratio is about the same as ARM's above.
 
 ## On emulated arm64
 
@@ -86,4 +83,5 @@ The commands and output are in [`runs.txt`](runs.txt).
 
 ## Over HTTP
 
-Only on ARM: the x86_64 build doesn't change. To be added by the coordinator with the ARM numbers.
+Only on ARM: the x86_64 build doesn't change, and no ARM host was available to run the app under
+load. The table above measures the hashing alone.
