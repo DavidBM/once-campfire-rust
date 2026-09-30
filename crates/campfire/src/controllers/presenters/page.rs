@@ -22,7 +22,7 @@ macro_rules! framed_page {
         $crate::controllers::presenters::view_context::page_or_frame(
             $c,
             $status,
-            |$ctx| askama::Template::render(&$page),
+            |$ctx| campfire_views::layouts::render_page(&$page),
             |$ctx| {
                 let page = $page;
                 campfire_views::layouts::frame($ctx, page.as_head(), page.as_content())
@@ -150,5 +150,82 @@ impl Partials for Rendered {
 
     fn direct_room(&self, membership: &Membership) -> String {
         self.direct_rooms.iter().find(|(id, _)| *id == membership.id).map(|(_, html)| html.clone()).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hint::black_box;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use campfire_views::messages::{MessageItem, RoomKind, UserView};
+    use campfire_views::rooms::{RoomView, Show, ShowView};
+    use campfire_views::{AccountSummary, CurrentUser, Platform, ViewContext};
+
+    /// In-process timing behind bench/results/page-parts-hot-path-20260930, under the binary's
+    /// jemalloc: `cargo test --release -p campfire --bin campfire -- --ignored --nocapture
+    /// render_timing`. A room page of 40 cached messages of 9-11 KB, rendered from askama's
+    /// `SIZE_HINT` as before and into a presized buffer.
+    #[test]
+    #[ignore = "a timing harness, not a test"]
+    fn render_timing() {
+        fn time<T>(name: &str, iterations: u32, mut f: impl FnMut() -> T) {
+            let mut runs: Vec<Duration> = (0..9)
+                .map(|_| {
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        black_box(f());
+                    }
+                    start.elapsed() / iterations
+                })
+                .collect();
+            runs.sort();
+            println!("{name}: median {:?} (min {:?}, max {:?})", runs[4], runs[0], runs[8]);
+        }
+
+        let user = UserView { id: 1, name: "David".into(), title: "David".into(), avatar_url: "/users/1/avatar".into() };
+        let show = ShowView {
+            room: RoomView { id: 1, kind: RoomKind::Open, name: Some("All Talk".into()), display_name: "All Talk".into() },
+            updated_at: jiff::Timestamp::UNIX_EPOCH,
+            user,
+            messages: (0..40)
+                .map(|n| MessageItem::Fragment {
+                    client_message_id: n.to_string(),
+                    room_id: 1,
+                    html: Arc::new(format!("<div id=\"message_{n}\">{}</div>\n", "<p>hello</p>".repeat(750 + n * 397 % 2_000 / 12))),
+                })
+                .collect(),
+            invitation: false,
+            join_code: String::new(),
+            messages_stream_name: "stream".into(),
+        };
+        let asset_path = |path: &str| campfire_assets::asset_path(path);
+        let stylesheets = crate::controllers::presenters::view_context::stylesheet_tags();
+        let ctx = ViewContext {
+            current_user: Some(CurrentUser { id: 1, name: "David".into(), administrator: true, bot: false, avatar_url: "/a".into() }),
+            account: AccountSummary { name: "Campfire".into(), logo_url: "/account/logo".into(), has_logo: false },
+            flash_notice: None,
+            flash_alert: None,
+            platform: Platform::default(),
+            vapid_public_key: None,
+            asset_path: &asset_path,
+            importmap_tags: campfire_assets::javascript_importmap_tags(),
+            stylesheet_tags: &stylesheets.html,
+            custom_styles: None,
+            cable_url: "/cable".into(),
+            base_url: "http://campfire.test".into(),
+            request_url: "http://campfire.test/rooms/1".into(),
+            referrer: None,
+            last_room_visited_id: Some(1),
+            app_version: "0".into(),
+        };
+        let page = Show { ctx: &ctx, show: &show };
+        let html = campfire_views::layouts::render_page(&page).unwrap();
+        println!("room page: {} bytes", html.len());
+        assert_eq!(html, askama::Template::render(&page).unwrap());
+
+        time("room page render from SIZE_HINT (askama's render)", 2_000, || askama::Template::render(&page).unwrap().len());
+        time("room page render into a presized buffer", 2_000, || campfire_views::layouts::render_page(&page).unwrap().len());
     }
 }

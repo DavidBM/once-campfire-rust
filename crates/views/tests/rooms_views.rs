@@ -2,14 +2,43 @@
 
 mod messages_support;
 
+use std::sync::Arc;
+
 use askama::Template;
+use campfire_views::layouts::{Page, render_page};
+use campfire_views::messages::MessageItem;
 use campfire_views::rooms::{self, ClosedFormView, DirectEditView, InvolvementView, OpenFormView, RefreshView, ShowView};
 use messages_support::golden;
 
 fn show(name: &str) {
     let g = golden(name);
     let show: ShowView = g.input();
-    g.assert_dom(&g.render(|ctx| rooms::Show { ctx, show: &show }.render().unwrap()));
+    g.assert_dom(&g.render(|ctx| {
+        let page = rooms::Show { ctx, show: &show };
+        let html = render_page(&page).unwrap();
+        assert_eq!(html, page.render().unwrap(), "the same page, however the buffer starts");
+        html
+    }));
+}
+
+#[test]
+fn a_room_of_cached_messages_renders_into_a_buffer_it_fits() {
+    let g = golden("rooms_show_member");
+    let mut show: ShowView = g.input();
+    show.messages = (0..40)
+        .map(|n| MessageItem::Fragment {
+            client_message_id: n.to_string(),
+            room_id: show.room.id,
+            html: Arc::new(format!("<div id=\"message_{n}\">{}</div>\n", "x".repeat(9_000 + n * 50))),
+        })
+        .collect();
+    g.render(|ctx| {
+        let page = rooms::Show { ctx, show: &show };
+        let html = render_page(&page).unwrap();
+        assert_eq!(html, page.render().unwrap());
+        assert_eq!(html.capacity(), rooms::Show::SIZE_HINT + page.extra_capacity(), "never regrown");
+        html
+    });
 }
 
 #[test]

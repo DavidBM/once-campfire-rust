@@ -161,6 +161,10 @@ pub enum MessageItem {
     View(Box<MessageView>),
 }
 
+/// What a message that isn't cached yet is taken to render to: its fragment is 9-11 KB in the
+/// parity seed's rooms and in the benchmark's.
+const UNCACHED_MESSAGE_LEN: usize = 12 * 1024;
+
 impl MessageItem {
     /// `dom_id(message)` / `dom_id(message, prefix)`.
     pub fn dom_id(&self, prefix: &str) -> String {
@@ -176,6 +180,17 @@ impl MessageItem {
             MessageItem::Fragment { room_id, .. } => *room_id,
             MessageItem::View(message) => message.room_id,
         }
+    }
+
+    /// What `items` render to: their fragments, and a guess for the ones not cached yet.
+    pub fn html_len(items: &[MessageItem]) -> usize {
+        items
+            .iter()
+            .map(|item| match item {
+                MessageItem::Fragment { html, .. } => html.len(),
+                MessageItem::View(_) => UNCACHED_MESSAGE_LEN,
+            })
+            .sum()
     }
 
     /// The cached fragments of a rendered page's `items`, in order, including those this render
@@ -371,6 +386,14 @@ fn boost_digest() -> &'static str {
 pub struct Index<'a> {
     pub ctx: &'a ViewContext<'a>,
     pub messages: &'a [MessageItem],
+}
+
+impl Index<'_> {
+    /// Renders into a buffer with room for the messages and the line after each one (see
+    /// [`crate::layouts::render_with_capacity`]).
+    pub fn render_presized(&self) -> askama::Result<String> {
+        crate::layouts::render_with_capacity(self, MessageItem::html_len(self.messages) + self.messages.len())
+    }
 }
 
 /// `messages/show`: the message partial, inside the application layout.

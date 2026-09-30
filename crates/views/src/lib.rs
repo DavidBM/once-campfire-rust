@@ -52,6 +52,12 @@ pub struct ViewContext<'a> {
 }
 
 impl ViewContext<'_> {
+    /// What the application layout interpolates from the context that can be large: the asset
+    /// tags and the custom styles.
+    pub fn layout_len(&self) -> usize {
+        self.importmap_tags.len() + self.stylesheet_tags.len() + self.custom_styles.as_deref().map_or(0, str::len)
+    }
+
     pub fn asset(&self, logical_path: &str) -> String {
         (self.asset_path)(logical_path)
     }

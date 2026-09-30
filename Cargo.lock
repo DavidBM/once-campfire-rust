@@ -442,6 +442,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "flate2",
+ "foldhash",
  "futures-util",
  "hex",
  "http-body-util",
