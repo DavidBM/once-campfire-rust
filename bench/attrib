@@ -5,12 +5,16 @@ drifts hit every configuration alike.
 
   bench/attrib [--configs proxy-thruster,proxy-direct,host-thruster,host-direct] [--reps 3]
                [--out DIR] [--routes up,room_show,...] [--concs 1,16,64] [--secs 5]
-               [--cable 1000] [--posters 4]
+               [--cable 1000] [--posters 4] [--user-agent UA]
   bench/attrib-report DIR
 
 Each run records throughput and latency (as bench/run), and CPU seconds per request for every
 server-side process (campfire, thrust, docker-proxy) and for the load generator, read from
 /proc/<pid>/stat around each run. The cable run also records RssAnon per fan-out phase.
+
+The load generator sends no User-Agent unless given one with --user-agent, which it then sends on
+every request; a desktop Chrome, say:
+  --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 
 Knobs (env): SERVER_CPUS=8-11 LOADGEN_CPUS=12-15 PORT=4390 RUST_IMAGE=campfire-rust:app,
 NATIVE_<LABEL>_BIN / NATIVE_<LABEL>_PRELOAD for native-<label> configurations.
@@ -30,7 +34,9 @@ p.add_argument("--secs", default="5")
 p.add_argument("--cable", default="1000", help="client counts, comma separated; empty to skip")
 p.add_argument("--posters", default="4")
 p.add_argument("--app-env", action="append", default=[], help="extra app environment, K=V (repeatable)")
+p.add_argument("--user-agent", help="User-Agent for every loadgen request (default: none), e.g. 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'")
 a = p.parse_args()
+b.USER_AGENT = a.user_agent
 
 out = a.out or os.path.join(b.BENCH, "results", "attrib-" + time.strftime("%Y%m%d-%H%M%S"))
 os.makedirs(out, exist_ok=True)
@@ -50,6 +56,7 @@ with open(os.path.join(out, "env.txt"), "w") as f:
             f.write(f"{c}: {os.environ.get(f'NATIVE_{l}_BIN')} preload={os.environ.get(f'NATIVE_{l}_PRELOAD', '')}\n")
     f.write(f"env: {' '.join(f'{k}={v}' for k, v in b.app_env().items() if 'CONC' in k or 'THREADS' in k)}\n")
     f.write(f"routes: {a.routes}; concs: {a.concs}; secs: {a.secs}; cable: {a.cable}; app env: {' '.join(a.app_env)}\n")
+    f.write(f"user agent: {a.user_agent if a.user_agent is not None else '(none)'}\n")
 
 try:
     for rep in range(1, a.reps + 1):

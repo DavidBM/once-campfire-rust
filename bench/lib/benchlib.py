@@ -30,6 +30,9 @@ CONTAINER = f"bench-attrib-{PORT}"
 # BENCH_WORK_DIR puts the app's storage elsewhere (e.g. on tmpfs, to take fsync out of the picture).
 WORK = os.path.join(os.environ.get("BENCH_WORK_DIR", os.path.join(BENCH, ".work")), f"attrib-{PORT}")
 CLK_TCK = os.sysconf("SC_CLK_TCK")
+# Sent as `--user-agent` with every loadgen command when set (bench/attrib and bench/profile set it
+# from their own `--user-agent`); by default loadgen sends no User-Agent.
+USER_AGENT = None
 
 
 def log(*a):
@@ -247,13 +250,17 @@ def start(config, seed, extra_env=None):
 def lg(*args, stderr=False):
     """Runs loadgen pinned to LOADGEN_CPUS; returns (json, loadgen cpu secs[, stderr])."""
     r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
-    p = subprocess.run(["taskset", "-c", LOADGEN_CPUS, LOADGEN, *map(str, args)], capture_output=True, text=True)
+    p = subprocess.run(["taskset", "-c", LOADGEN_CPUS, LOADGEN, *map(str, args), *user_agent_args()], capture_output=True, text=True)
     r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
     if p.returncode != 0:
         raise RuntimeError(f"loadgen {args[0]} failed: {p.stderr[-2000:]}")
     cpu = (r1.ru_utime - r0.ru_utime) + (r1.ru_stime - r0.ru_stime)
     out = json.loads(p.stdout)
     return (out, cpu, p.stderr) if stderr else (out, cpu)
+
+
+def user_agent_args():
+    return ["--user-agent", USER_AGENT] if USER_AGENT is not None else []
 
 
 def session(app, labels):

@@ -15,10 +15,15 @@
 //! `http` also takes `--gzip 0` (`Accept-Encoding: identity`), `--requests N` (stop after N requests,
 //! for allocation counting) and `--trace FILE` (each request's start, latency and status). `cable` prints `PHASE <name> <unix ms>` lines on stderr so memory
 //! samples can be attributed to its phases.
+//!
+//! Every command takes `--user-agent UA`, sent as the `User-Agent` of each request it makes,
+//! WebSocket handshakes included; without it there is no `User-Agent` header. For example, a
+//! desktop Chrome: `--user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+//! (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'` (one line).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -57,6 +62,13 @@ impl Args {
     }
 }
 
+/// `--user-agent`, set once in `main`.
+static USER_AGENT: OnceLock<Option<String>> = OnceLock::new();
+
+fn user_agent() -> Option<&'static str> {
+    USER_AGENT.get().and_then(Option::as_deref)
+}
+
 fn host_port(base: &str) -> String {
     base.trim_start_matches("http://").trim_end_matches('/').to_string()
 }
@@ -86,6 +98,9 @@ async fn send(
     body: Bytes,
 ) -> Res<Resp> {
     let mut req = hyper::Request::builder().method(method).uri(path).header("host", addr);
+    if let Some(user_agent) = user_agent() {
+        req = req.header("user-agent", user_agent);
+    }
     for (k, v) in headers {
         req = req.header(*k, v.as_str());
     }
@@ -401,6 +416,9 @@ async fn cable_client(
     h.insert("cookie", cookie.parse()?);
     h.insert("origin", format!("http://{addr}").parse()?);
     h.insert("sec-websocket-protocol", "actioncable-v1-json, actioncable-unsupported".parse()?);
+    if let Some(user_agent) = user_agent() {
+        h.insert("user-agent", user_agent.parse()?);
+    }
     let debug = std::env::var_os("LOADGEN_DEBUG").is_some();
     if debug {
         eprintln!("connecting {:?}", req.headers());
@@ -983,6 +1001,7 @@ async fn main() {
     let raw: Vec<String> = std::env::args().collect();
     let cmd = raw.get(1).cloned().unwrap_or_default();
     let a = Args::parse(&raw[2.min(raw.len())..]);
+    USER_AGENT.set(a.opt("user-agent")).expect("set once");
     let out = match cmd.as_str() {
         "login" => login(&a).await,
         "scrape" => scrape(&a).await,
