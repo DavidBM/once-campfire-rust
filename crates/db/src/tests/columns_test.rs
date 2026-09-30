@@ -355,28 +355,23 @@ fn memberships_read_by_position_as_by_name() {
 
 /// A room page's worth of rows and more: 200 messages in room 1, and user 1 in 12 rooms.
 fn timing_database() -> Connection {
-    let mut conn = Connection::open_in_memory().unwrap();
-    schema::prepare(&mut conn, "test", &SystemClock).unwrap();
-    conn.execute(r#"INSERT INTO "users" ("id", "name", "created_at", "updated_at") VALUES (1, 'User', ?, ?)"#, params![at(0), at(0)])
-        .unwrap();
-    for room in 1..=12 {
-        conn.execute(
-            r#"INSERT INTO "rooms" ("id", "name", "type", "creator_id", "created_at", "updated_at") VALUES (?, ?, 'Rooms::Open', 1, ?, ?)"#,
-            params![room, format!("Room {room}"), at(room), at(room + 1)],
-        )
-        .unwrap();
-        conn.execute(
-            r#"INSERT INTO "memberships" ("room_id", "user_id", "involvement", "unread_at", "connected_at", "connections", "created_at", "updated_at") VALUES (?, 1, 'mentions', ?, NULL, 0, ?, ?)"#,
-            params![room, (room % 2 == 0).then(|| at(room)), at(room), at(room + 1)],
-        )
-        .unwrap();
+    let conn = database(Layout::Schema);
+    insert_user(&conn, 1);
+    for id in 1..=12 {
+        let (created_at, updated_at) = (at(id), at(id + 1));
+        insert_room(
+            &conn,
+            &Room { id, name: Some(format!("Room {id}")), room_type: RoomType::Open, creator_id: 1, created_at, updated_at },
+        );
+        let unread_at = (id % 2 == 0).then_some(created_at);
+        let involvement = Some(Involvement::Mentions);
+        let membership =
+            Membership { id, room_id: id, user_id: 1, involvement, unread_at, connected_at: None, connections: 0, created_at, updated_at };
+        insert_membership(&conn, &membership);
     }
-    for n in 1..=200 {
-        conn.execute(
-            r#"INSERT INTO "messages" ("id", "room_id", "creator_id", "client_message_id", "created_at", "updated_at") VALUES (?, 1, 1, ?, ?, ?)"#,
-            params![n, format!("5f0c2b4e-1d7a-4c39-9a57-{n:012}"), at(n), at(n + 1)],
-        )
-        .unwrap();
+    for id in 1..=200 {
+        let client_message_id = format!("5f0c2b4e-1d7a-4c39-9a57-{id:012}");
+        insert_message(&conn, &Message { id, room_id: 1, creator_id: 1, client_message_id, created_at: at(id), updated_at: at(id + 1) });
     }
     conn
 }
