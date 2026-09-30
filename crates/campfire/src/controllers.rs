@@ -329,24 +329,32 @@ pub async fn dispatch(c: &mut Ctx) -> Result {
 pub fn recognize(method: &Method, path: &str) -> Result<Option<(&'static Route, ParamMap)>> {
     let verb = if *method == Method::HEAD { &Method::GET } else { method };
     for route in routes() {
-        if route.verb != *verb {
+        // `captures` allocates its slots whether or not the route matches, and most don't;
+        // `is_match` doesn't, so only the route that matches pays for them.
+        if route.verb != *verb || !route.regex.is_match(path) {
             continue;
         }
         let Some(captures) = route.regex.captures(path) else { continue };
-        let mut params = ParamMap::new();
-        for (name, value) in route.defaults {
-            params.insert(*name, Param::Str(value.to_string()));
-        }
-        for (i, name) in route.names.iter().enumerate() {
-            if let Some(value) = captures.get(i + 1) {
-                params.insert(name.clone(), Param::Str(unescape_uri(value.as_str())?));
-            }
-        }
-        params.insert("controller", Param::Str(route.controller().to_string()));
-        params.insert("action", Param::Str(route.action_name().to_string()));
-        return Ok(Some((route, params)));
+        return Ok(Some((route, path_params(route, &captures)?)));
     }
     Ok(None)
+}
+
+/// A matched route's path parameters: its defaults, then its captures (percent-decoded), then
+/// `controller` and `action`.
+fn path_params(route: &Route, captures: &regex::Captures) -> Result<ParamMap> {
+    let mut params = ParamMap::new();
+    for (name, value) in route.defaults {
+        params.insert(*name, Param::Str(value.to_string()));
+    }
+    for (i, name) in route.names.iter().enumerate() {
+        if let Some(value) = captures.get(i + 1) {
+            params.insert(name.clone(), Param::Str(unescape_uri(value.as_str())?));
+        }
+    }
+    params.insert("controller", Param::Str(route.controller().to_string()));
+    params.insert("action", Param::Str(route.action_name().to_string()));
+    Ok(params)
 }
 
 /// `params` is body params, then query params, then path params (`request.parameters`).
@@ -540,6 +548,149 @@ mod tests {
                 (None, None) => {}
                 (Some(endpoint), None) => panic!("{} {} should be {endpoint}", sample.verb, sample.path),
             }
+        }
+    }
+
+    /// Recognition the straightforward way: try the verb's routes in table order and take the
+    /// first whose regex matches. `recognize` must agree with it on every path.
+    fn recognize_by_scanning(method: &Method, path: &str) -> Result<Option<(&'static Route, ParamMap)>> {
+        let verb = if *method == Method::HEAD { &Method::GET } else { method };
+        for route in routes().iter().filter(|route| route.verb == *verb) {
+            if let Some(captures) = route.regex.captures(path) {
+                return Ok(Some((route, path_params(route, &captures)?)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The matched row's index and params, or the error, in a form that compares.
+    type Outcome = std::result::Result<Option<(usize, ParamMap)>, String>;
+
+    fn outcome(recognized: Result<Option<(&'static Route, ParamMap)>>) -> Outcome {
+        match recognized {
+            Ok(Some((route, params))) => Ok(Some((routes().iter().position(|row| std::ptr::eq(row, route)).unwrap(), params))),
+            Ok(None) => Ok(None),
+            Err(error) => Err(format!("{error:?}")),
+        }
+    }
+
+    /// A route pattern's paths: with and without the format, and with its params filled in with
+    /// ids, words and percent-escapes.
+    fn filled_in(pattern: &str) -> Vec<String> {
+        static PARAM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([:*])(\w+)").unwrap());
+        let mut paths = Vec::new();
+        for format in ["", ".:format"] {
+            let pattern = pattern.replace("(.:format)", format);
+            for (param, glob) in [("1", "photo"), ("opens", "dir/photo.tar.gz"), ("caf%C3%A9", "a%2Fb/c%20d")] {
+                paths.push(
+                    PARAM
+                        .replace_all(&pattern, |c: &regex::Captures| match (&c[1], &c[2]) {
+                            (":", "format") => "json",
+                            (":", _) => param,
+                            _ => glob,
+                        })
+                        .into_owned(),
+                );
+            }
+        }
+        paths
+    }
+
+    /// `path` and its near misses: other formats, trailing and doubled slashes, a character or a
+    /// segment more or less, other case, a query, and escapes that aren't UTF-8.
+    fn variants(path: &str) -> Vec<String> {
+        let mut variants =
+            vec![path.to_string(), path.to_uppercase(), path.replacen('/', "//", 2), path.trim_start_matches('/').to_string()];
+        for suffix in [".json", ".turbo_stream", ".1.2", ".", "/", "//", "x", "/x", "/new", "/edit", "?q=1", "%FF", "%2F"] {
+            variants.push(format!("{path}{suffix}"));
+        }
+        if let Some((last, _)) = path.char_indices().last() {
+            variants.push(path[..last].to_string());
+        }
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            variants.extend([parent.to_string(), format!("{parent}/%E9"), format!("{parent}/@42"), format!("{parent}/opens")]);
+        }
+        variants
+    }
+
+    /// Every path the Rails vectors recognize and every route pattern filled in, as given and
+    /// normalized, with their near misses.
+    fn corpus() -> std::collections::BTreeSet<String> {
+        let vectors = vectors();
+        let seeds = vectors
+            .recognitions
+            .iter()
+            .map(|sample| sample.path.clone())
+            .chain(vectors.routes.iter().flat_map(|route| filled_in(&route.path)));
+        seeds.flat_map(|seed| [normalize_path(&seed), seed]).flat_map(|path| variants(&path)).collect()
+    }
+
+    #[test]
+    fn recognizes_like_a_first_match_scan() {
+        let corpus = corpus();
+        let verbs = [Method::GET, Method::HEAD, Method::POST, Method::PATCH, Method::PUT, Method::DELETE, Method::OPTIONS];
+        let (mut rows, mut missed, mut failed) = (std::collections::BTreeSet::new(), 0, 0);
+        for verb in &verbs {
+            for path in &corpus {
+                let expected = outcome(recognize_by_scanning(verb, path));
+                assert_eq!(outcome(recognize(verb, path)), expected, "{verb} {path}");
+                match expected {
+                    Ok(Some((row, _))) => {
+                        rows.insert(row);
+                    }
+                    Ok(None) => missed += 1,
+                    Err(_) => failed += 1,
+                }
+            }
+        }
+        // Every row answers some path, except the three that `GET /rooms/:id`, drawn first, shadows.
+        let unmatched: Vec<String> = routes()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !rows.contains(i))
+            .map(|(_, route)| format!("{} {}", route.verb, route.pattern))
+            .collect();
+        assert_eq!(unmatched, ["GET /rooms/opens(.:format)", "GET /rooms/closeds(.:format)", "GET /rooms/directs(.:format)"]);
+        assert!(missed > 10_000 && failed > 1_000, "{missed} paths missed, {failed} failed");
+    }
+
+    /// Times `recognize` on the paths the page benchmarks request, `/up`, Active Storage URLs and a
+    /// 404 (bench/results/routing-20260930):
+    /// `cargo test --release -p campfire --bin campfire -- --ignored --nocapture times_recognition`
+    #[test]
+    #[ignore = "a timing harness; run it in a release build"]
+    fn times_recognition() {
+        let long_filename = format!("/rails/active_storage/blobs/redirect/abc--def/{}photo.png", "dir/café.tar/".repeat(160));
+        let paths: &[(&str, &str)] = &[
+            ("room_show", "/rooms/12"),
+            ("messages_page", "/rooms/12/messages"),
+            ("search", "/searches"),
+            ("up", "/up"),
+            (
+                "representation",
+                "/rails/active_storage/representations/redirect/eyJfcmFpbHMiOnsiZGF0YSI6NDIsInB1ciI6ImJsb2JfaWQifX0=--4c2a1f0e9b8d7c6a5f4e3d2c1b0a9f8e7d6c5b4a/eyJfcmFpbHMiOnsiZGF0YSI6eyJmb3JtYXQiOiJ3ZWJwIiwicmVzaXplX3RvX2xpbWl0IjpbMTIwMCwxMjAwXX0sInB1ciI6InZhcmlhdGlvbiJ9fQ==--0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4/photo.png",
+            ),
+            ("long filename", &long_filename),
+            ("404", "/wp-login.php"),
+        ];
+        const SAMPLES: usize = 9;
+        const ITERATIONS: u32 = 200_000;
+
+        // The first thread to use a regex owns its fast cache slot; the server's other workers
+        // take the shared pool. Warm up on a thread of its own so the timed thread is one of those.
+        std::thread::scope(|scope| scope.spawn(|| paths.iter().for_each(|(_, path)| drop(recognize(&Method::GET, path)))).join().unwrap());
+        for (name, path) in paths {
+            let mut samples: Vec<f64> = (0..SAMPLES)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    for _ in 0..ITERATIONS {
+                        std::hint::black_box(recognize(&Method::GET, std::hint::black_box(path)).unwrap());
+                    }
+                    started.elapsed().as_nanos() as f64 / f64::from(ITERATIONS)
+                })
+                .collect();
+            samples.sort_by(f64::total_cmp);
+            eprintln!("{name:<15} median {:>6.0} ns  (min {:.0}, max {:.0})", samples[SAMPLES / 2], samples[0], samples[SAMPLES - 1]);
         }
     }
 
