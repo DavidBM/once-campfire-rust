@@ -20,11 +20,12 @@ rand.workspace = true
 uuid.workspace = true
 crc32fast = { workspace = true, optional = true }
 tracing.workspace = true
-base64.workspace = true
+base64 = { workspace = true, optional = true }
 
 [features]
-# `campfire_db::fixtures`: the reference's test fixtures, loaded into a database for tests.
-test-support = ["dep:serde_yaml", "dep:crc32fast"]
+# `campfire_db::fixtures`, the reference's test fixtures loaded into a database, and
+# `campfire_db::testing`: `Env::default`, event sinks and a rich-text stand-in.
+test-support = ["dep:serde_yaml", "dep:crc32fast", "dep:base64"]
 
 [dev-dependencies]
 campfire_db = { path = ".", features = ["test-support"] }

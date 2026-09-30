@@ -286,7 +286,9 @@ pub fn gzip_bomb(megabytes: usize) -> Vec<u8> {
     encoder.finish().unwrap().repeat(megabytes)
 }
 
-/// The reference fixtures in a fresh database (like `fixtures :all`).
+const SECRET_KEY_BASE: &str = "integrations-test-secret-key-base";
+
+/// The reference fixtures in a fresh database (like `fixtures :all`), with the app's rich text.
 pub struct TestDb {
     pub db: campfire_db::Database,
     path: std::path::PathBuf,
@@ -294,13 +296,20 @@ pub struct TestDb {
 
 impl TestDb {
     pub fn new() -> Self {
-        use campfire_db::{BasicRichText, Config, Database, Env, NullSink, TestClock, fixtures};
+        use campfire_db::testing::NullSink;
+        use campfire_db::{Config, Database, Env, fixtures};
+        use campfire_kit::TestClock;
+        use rails_compat::Secrets;
+
+        use crate::rich_text::AppRichText;
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path = std::env::temp_dir().join(format!("campfire-integrations-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
-        let env = Env { clock: Arc::new(TestClock::new()), sink: Arc::new(NullSink), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
+        let clock = Arc::new(TestClock::new());
+        let rich_text = Arc::new(AppRichText::new(Arc::new(Secrets::new(SECRET_KEY_BASE)), clock.clone()));
+        let env = Env { clock, sink: Arc::new(NullSink), rich_text, bcrypt_cost: 4 };
         let mut config = Config::new(path.join("test.sqlite3"));
         config.environment = "test".into();
         let db = Database::open(config, env).unwrap();

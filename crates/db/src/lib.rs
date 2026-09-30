@@ -14,6 +14,8 @@ pub mod fixtures;
 pub mod models;
 pub mod rich_text;
 pub mod schema;
+#[cfg(feature = "test-support")]
+pub mod testing;
 pub mod time;
 
 mod sql;
@@ -22,11 +24,11 @@ pub use sql::{CachedStatements, placeholders, query_all, query_one};
 
 pub use database::{Config, Database, Env, Tx, run_write};
 pub use error::{Error, Errors, Result};
-pub use events::{Event, EventSink, NullSink, RecordingSink};
+pub use events::{Event, EventSink};
 pub use models::*;
-pub use rich_text::{BasicRichText, RichText};
+pub use rich_text::RichText;
 pub use rusqlite::Connection;
-pub use time::{Clock, SystemClock, TestClock, Timestamp};
+pub use time::Timestamp;
 
 #[cfg(test)]
 mod tests;

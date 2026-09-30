@@ -1,5 +1,5 @@
 //! Ports of reference/test/channels/**, plus the channels the reference doesn't test directly.
-use campfire_db::Clock as _;
+use campfire_db::Session;
 use serde_json::json;
 
 use super::support::*;
@@ -23,6 +23,22 @@ async fn rejects_a_connection_without_or_with_a_bad_session_cookie() {
         let mut client = app.connect_with_cookie(cookie.as_deref()).await;
         assert_eq!(client.until_closed().await, vec![unauthorized.to_string()]);
     }
+}
+
+#[tokio::test]
+async fn rejects_a_session_cookie_once_it_expires() {
+    let app = start().await;
+    let user_id = id("david");
+    let session = app.db.write(move |tx| Session::start(tx, user_id, Some("test"), Some("8.8.8.8"))).await.unwrap();
+    let expires_at = app.now().jiff() + jiff::SignedDuration::from_secs(60);
+    let cookie = app.cookie_with_token_expiring(&session.token, Some(expires_at));
+
+    let mut client = app.connect_with_cookie(Some(&cookie)).await;
+    assert_eq!(client.next_text().await, r#"{"type":"welcome"}"#);
+
+    app.clock.travel(jiff::SignedDuration::from_secs(61));
+    let mut client = app.connect_with_cookie(Some(&cookie)).await;
+    assert_eq!(client.until_closed().await, vec![r#"{"type":"disconnect","reason":"unauthorized","reconnect":false}"#.to_string()]);
 }
 
 // HeartbeatChannel and ApplicationCable::Channel
@@ -74,7 +90,7 @@ async fn presence_subscribes_and_marks_the_membership_connected() {
     client.confirm(&reads).await;
 
     let membership = app.membership("designers", "david").await.unwrap();
-    assert!(!membership.is_connected(app.clock.now()));
+    assert!(!membership.is_connected(app.now()));
     // A member's unread room gets cleared by `present`.
     app.db
         .write(move |tx| {
@@ -88,12 +104,12 @@ async fn presence_subscribes_and_marks_the_membership_connected() {
     assert_eq!(client.next_text().await, delivery(&reads, &format!(r#"{{"room_id":{}}}"#, id("designers"))));
 
     let membership = app.membership("designers", "david").await.unwrap();
-    assert!(membership.is_connected(app.clock.now()));
+    assert!(membership.is_connected(app.now()));
     assert_eq!(membership.connections, 1);
     assert_eq!(membership.unread_at, None);
 
     client.unsubscribe(&presence).await;
-    eventually(|| async { !app.membership("designers", "david").await.unwrap().is_connected(app.clock.now()) }).await;
+    eventually(|| async { !app.membership("designers", "david").await.unwrap().is_connected(app.now()) }).await;
     let membership = app.membership("designers", "david").await.unwrap();
     assert_eq!((membership.connections, membership.connected_at), (0, None));
 }
@@ -110,9 +126,9 @@ async fn presence_counts_connections_and_refreshes() {
 
     // `refresh` reconnects a membership that timed out.
     app.clock.travel(jiff::SignedDuration::from_secs(61));
-    assert!(!app.membership("designers", "david").await.unwrap().is_connected(app.clock.now()));
+    assert!(!app.membership("designers", "david").await.unwrap().is_connected(app.now()));
     first.perform(&presence, json!({ "action": "refresh" })).await;
-    eventually(|| async { app.membership("designers", "david").await.unwrap().is_connected(app.clock.now()) }).await;
+    eventually(|| async { app.membership("designers", "david").await.unwrap().is_connected(app.now()) }).await;
     assert_eq!(app.membership("designers", "david").await.unwrap().connections, 1);
 
     second.unsubscribe(&presence).await;

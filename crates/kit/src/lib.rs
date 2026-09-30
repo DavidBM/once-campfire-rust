@@ -23,7 +23,6 @@ pub mod app;
 pub mod body;
 pub mod clock;
 pub mod cookies;
-pub mod crypto;
 pub mod ctx;
 pub mod deflater;
 pub mod error;
@@ -35,14 +34,11 @@ pub mod request;
 pub mod response;
 pub mod server;
 pub mod session;
-#[cfg(any(test, feature = "test-support"))]
-pub mod testing;
 
 pub use adapter::{ActionFn, OriginalMethod, RequestId, action, app, delete, get, patch, post, put};
 pub use app::{Kit, KitConfig};
-pub use clock::{Clock, FrozenClock, SharedClock, SystemClock};
+pub use clock::{Clock, SharedClock, SystemClock, TestClock};
 pub use cookies::{Cookie, CookieJar, SameSite};
-pub use crypto::{Crypto, RailsCrypto, SharedCrypto};
 pub use ctx::{Ctx, Freshness, Redirect};
 pub use error::{Error, Result, halt};
 pub use format::{Format, Mime};

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, Result};
+use campfire_kit::{Ctx, Kit, KitConfig, Result};
 use tower::ServiceExt;
 
 use super::*;
@@ -176,7 +176,7 @@ async fn whoami(c: &mut Ctx) -> Result {
 }
 
 fn whoami_router(app: &App) -> axum::Router {
-    let kit = Kit::new(KitConfig::production(true), Arc::new(RailsCrypto::new(app.secrets.clone())), app.clock.clone(), app.clone());
+    let kit = Kit::new(KitConfig::production(true), app.secrets.clone(), app.clock.clone(), app.clone());
     campfire_kit::app(axum::Router::new().route("/whoami", campfire_kit::get(whoami).post(campfire_kit::action(whoami))), kit)
 }
 

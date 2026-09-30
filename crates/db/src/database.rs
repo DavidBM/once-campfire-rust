@@ -27,20 +27,21 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
+use rails_compat::clock::SharedClock;
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{Error, Result};
-use crate::events::{Event, EventSink, NullSink};
-use crate::rich_text::{BasicRichText, RichText};
+use crate::events::{Event, EventSink};
+use crate::rich_text::RichText;
 use crate::schema;
-use crate::time::{Clock, SystemClock, Timestamp};
+use crate::time::Timestamp;
 
 /// Everything models need besides the connection: the clock, where side effects go, and
 /// the Action Text adapter.
 #[derive(Clone)]
 pub struct Env {
-    pub clock: Arc<dyn Clock>,
+    pub clock: SharedClock,
     pub sink: Arc<dyn EventSink>,
     pub rich_text: Arc<dyn RichText>,
     /// BCrypt cost for `has_secure_password`. Rails uses `BCrypt::Engine.cost` (12), or
@@ -48,20 +49,10 @@ pub struct Env {
     pub bcrypt_cost: u32,
 }
 
-impl Default for Env {
-    fn default() -> Self {
-        Self {
-            clock: Arc::new(SystemClock),
-            sink: Arc::new(NullSink),
-            rich_text: Arc::new(BasicRichText),
-            bcrypt_cost: rails_compat::password::COST,
-        }
-    }
-}
-
 impl Env {
+    /// `Time.current`, at the microseconds a `datetime(6)` column keeps.
     pub fn now(&self) -> Timestamp {
-        self.clock.now()
+        Timestamp::from_jiff(self.clock.now())
     }
 }
 
@@ -426,6 +417,13 @@ mod tests {
 
     fn main_file_len(path: &Path) -> u64 {
         std::fs::metadata(path).unwrap().len()
+    }
+
+    #[test]
+    fn now_is_truncated_to_microseconds() {
+        let at = jiff::Timestamp::new(1_700_000_000, 123_456_999).unwrap();
+        let env = Env { clock: Arc::new(rails_compat::clock::TestClock::frozen_at(at)), ..Env::default() };
+        assert_eq!(env.now().to_db(), "2023-11-14 22:13:20.123456");
     }
 
     #[test]

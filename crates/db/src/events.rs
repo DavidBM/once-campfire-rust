@@ -3,7 +3,7 @@
 //! disconnects and so on. The sink runs on the writer thread, so it must hand work off
 //! (push onto a queue) rather than do it inline.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -30,40 +30,6 @@ pub enum Event {
 
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: Event);
-}
-
-/// Drops every event.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NullSink;
-
-impl EventSink for NullSink {
-    fn emit(&self, _event: Event) {}
-}
-
-/// Records events, for tests (`assert_enqueued_jobs` and friends).
-#[derive(Debug, Default, Clone)]
-pub struct RecordingSink {
-    events: Arc<Mutex<Vec<Event>>>,
-}
-
-impl RecordingSink {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn events(&self) -> Vec<Event> {
-        self.events.lock().unwrap().clone()
-    }
-
-    pub fn take(&self) -> Vec<Event> {
-        std::mem::take(&mut *self.events.lock().unwrap())
-    }
-}
-
-impl EventSink for RecordingSink {
-    fn emit(&self, event: Event) {
-        self.events.lock().unwrap().push(event);
-    }
 }
 
 impl<T: EventSink + ?Sized> EventSink for Arc<T> {

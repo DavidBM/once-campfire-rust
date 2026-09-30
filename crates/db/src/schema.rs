@@ -8,10 +8,11 @@
 //! `schema.rb`, so columns come out in alphabetical order; databases that were migrated keep
 //! migration order. All queries in this crate name their columns, so both work.
 
+use rails_compat::clock::Clock;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{Error, Result};
-use crate::time::{Clock, Timestamp};
+use crate::time::Timestamp;
 
 pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 
@@ -110,8 +111,8 @@ fn load_schema(conn: &mut Connection, environment: &str, clock: &dyn Clock) -> R
         tx.execute(r#"INSERT INTO "schema_migrations" ("version") VALUES (?)"#, [version])?;
     }
 
-    set_internal_metadata(&tx, "environment", environment, clock.now())?;
-    set_internal_metadata(&tx, "schema_sha1", SCHEMA_SHA1, clock.now())?;
+    set_internal_metadata(&tx, "environment", environment, Timestamp::from_jiff(clock.now()))?;
+    set_internal_metadata(&tx, "schema_sha1", SCHEMA_SHA1, Timestamp::from_jiff(clock.now()))?;
     tx.commit()?;
     Ok(())
 }
@@ -141,7 +142,7 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::SystemClock;
+    use rails_compat::clock::SystemClock;
 
     const REFERENCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../reference/db");
 

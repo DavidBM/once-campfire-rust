@@ -11,11 +11,13 @@
 //!
 //! Header formatting is `Rack::Utils.set_cookie_header` (Rack 3.2).
 
+use std::sync::Arc;
+
 use jiff::Timestamp;
+use rails_compat::Secrets;
 use serde_json::Value;
 
 use crate::clock::{self, SharedClock};
-use crate::crypto::SharedCrypto;
 use crate::{Error, Result};
 
 pub use rails_compat::cookies::escape;
@@ -127,7 +129,7 @@ pub struct CookieJar {
     cookies: Vec<(String, String)>,
     set_cookies: Vec<(String, Cookie)>,
     delete_cookies: Vec<(String, DeleteOptions)>,
-    crypto: SharedCrypto,
+    secrets: Arc<Secrets>,
     clock: SharedClock,
 }
 
@@ -143,7 +145,7 @@ impl std::fmt::Debug for CookieJar {
 
 impl CookieJar {
     /// Build the jar from the request's `Cookie` header(s).
-    pub fn from_headers<'a>(headers: impl IntoIterator<Item = &'a str>, crypto: SharedCrypto, clock: SharedClock) -> Self {
+    pub fn from_headers<'a>(headers: impl IntoIterator<Item = &'a str>, secrets: Arc<Secrets>, clock: SharedClock) -> Self {
         let mut cookies: Vec<(String, String)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for header in headers {
@@ -153,7 +155,7 @@ impl CookieJar {
                 }
             }
         }
-        Self { cookies, set_cookies: vec![], delete_cookies: vec![], crypto, clock }
+        Self { cookies, set_cookies: vec![], delete_cookies: vec![], secrets, clock }
     }
 
     /// `cookies[name]`.
@@ -168,13 +170,13 @@ impl CookieJar {
     /// `cookies.signed[name]`.
     pub fn signed(&self, name: &str) -> Option<String> {
         let raw = self.get(name)?;
-        self.crypto.verify_signed_cookie(name, raw, self.clock.now())
+        rails_compat::cookies::verify_signed(&self.secrets, name, raw, self.clock.now())
     }
 
     /// `cookies.encrypted[name]`.
     pub fn encrypted(&self, name: &str) -> Option<Value> {
         let raw = self.get(name)?;
-        self.crypto.decrypt_cookie(name, raw, self.clock.now())
+        rails_compat::cookies::decrypt(&self.secrets, name, raw, self.clock.now())
     }
 
     /// `cookies[name] = value` (or `cookies.permanent[name] = ...` with [`Cookie::permanent`]).
@@ -186,7 +188,7 @@ impl CookieJar {
     /// `cookies.signed[name] = value`.
     pub fn set_signed(&mut self, name: &str, cookie: impl Into<Cookie>) -> Result<()> {
         let mut cookie = self.resolve_expiry(cookie.into());
-        cookie.value = self.crypto.sign_cookie(name, &cookie.value, cookie.expires);
+        cookie.value = rails_compat::cookies::sign(&self.secrets, name, &cookie.value, cookie.expires);
         check_for_overflow(name, &cookie.value)?;
         self.write_value(name, cookie);
         Ok(())
@@ -195,7 +197,7 @@ impl CookieJar {
     /// `cookies.encrypted[name] = value`; `cookie.value` is ignored in favor of `value`.
     pub fn set_encrypted(&mut self, name: &str, value: &Value, cookie: impl Into<Cookie>) -> Result<()> {
         let mut cookie = self.resolve_expiry(cookie.into());
-        cookie.value = self.crypto.encrypt_cookie(name, value, cookie.expires);
+        cookie.value = rails_compat::cookies::encrypt(&self.secrets, name, value, cookie.expires);
         check_for_overflow(name, &cookie.value)?;
         self.write_value(name, cookie);
         Ok(())
@@ -331,11 +333,14 @@ pub fn delete_cookie_header(name: &str, options: &DeleteOptions) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use super::*;
-    use crate::testing;
+    use crate::clock::TestClock;
 
     fn jar(header: &str) -> CookieJar {
-        CookieJar::from_headers([header], testing::crypto(), testing::frozen_clock())
+        static SECRETS: LazyLock<Arc<Secrets>> = LazyLock::new(|| Arc::new(Secrets::new("test-secret")));
+        CookieJar::from_headers([header], SECRETS.clone(), Arc::new(TestClock::frozen_at("2024-06-01T12:00:00Z".parse().unwrap())))
     }
 
     #[test]
@@ -382,8 +387,7 @@ mod tests {
         assert_eq!(jar.signed("session_token").as_deref(), Some("tok"));
 
         let raw = jar.get("session_token").unwrap().to_string();
-        let next =
-            CookieJar::from_headers([format!("session_token={}", escape(&raw)).as_str()], testing::crypto(), testing::frozen_clock());
+        let next = CookieJar::from_headers([format!("session_token={}", escape(&raw)).as_str()], jar.secrets.clone(), jar.clock.clone());
         assert_eq!(next.signed("session_token").as_deref(), Some("tok"));
     }
 

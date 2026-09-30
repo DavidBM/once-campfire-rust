@@ -117,7 +117,7 @@ where
     let query_params = params::from_query_string(request.query_string()).map_err(Error::from);
     let cookies = CookieJar::from_headers(
         request.headers.get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()),
-        kit.crypto().clone(),
+        kit.secrets().clone(),
         kit.clock().clone(),
     );
 

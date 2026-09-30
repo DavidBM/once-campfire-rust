@@ -436,7 +436,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
- "campfire_kit",
  "crc32fast",
  "flate2",
  "futures-util",

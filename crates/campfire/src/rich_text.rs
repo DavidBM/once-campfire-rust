@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use campfire_db::{BasicRichText, Connection, RichText};
+use campfire_db::{Connection, RichText};
 use campfire_kit::SharedClock;
 use campfire_richtext::RenderContext;
 use rails_compat::Secrets;
@@ -32,14 +32,14 @@ impl AppRichText {
 }
 
 impl RichText for AppRichText {
-    /// `message.body.to_plain_text`. Where Rails would raise, the save would fail; the models
-    /// can't fail here, so it's logged and the tag-stripped text is used instead.
-    fn to_plain_text(&self, conn: &Connection, html: &str, user_names: campfire_db::rich_text::UserNames<'_>) -> String {
+    /// `message.body.to_plain_text`. Where it raises, Rails fails the save after its commit; here
+    /// it's logged and the body has no plain text (see "Known differences" in the README).
+    fn to_plain_text(&self, conn: &Connection, html: &str) -> String {
         match self.with_context(conn, |ctx| campfire_richtext::to_plain_text(html, ctx)) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(%error, "to_plain_text raised");
-                BasicRichText.to_plain_text(conn, html, user_names)
+                String::new()
             }
         }
     }
@@ -53,5 +53,21 @@ impl RichText for AppRichText {
                 Vec::new()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_body_whose_plain_text_raises_has_none() {
+        let rich_text = AppRichText::new(Arc::new(Secrets::new("test-secret")), Arc::new(campfire_kit::SystemClock));
+        let conn = Connection::open_in_memory().unwrap();
+        // Rails raises `ArgumentError: invalid base64` reading the mention.
+        let html =
+            r#"Hey <action-text-attachment sgid="!!!" content-type="application/vnd.campfire.mention"></action-text-attachment> there"#;
+        assert_eq!(rich_text.to_plain_text(&conn, html), "");
+        assert_eq!(rich_text.to_plain_text(&conn, "Hey <b>there</b>"), "Hey there");
     }
 }

@@ -1,6 +1,7 @@
 //! End-to-end behavior of the HTTP layer through a real Axum router (`tower::ServiceExt::oneshot`).
 
 use std::net::SocketAddr;
+use std::sync::{Arc, LazyLock};
 
 use axum::Router;
 use axum::body::Body as AxumBody;
@@ -9,8 +10,10 @@ use axum::http::{Request as HttpRequest, header};
 use campfire_kit::exceptions::ErrorPages;
 use campfire_kit::format::{HTML, JSON, TURBO_STREAM};
 use campfire_kit::{
-    Cookie, Ctx, ExpiresIn, Freshness, Kit, KitConfig, Redirect, Result, SendOptions, StatusCode, action, front, halt, testing,
+    Cookie, Ctx, ExpiresIn, Freshness, Kit, KitConfig, Redirect, Result, SendOptions, SharedClock, StatusCode, TestClock, action, front,
+    halt,
 };
+use rails_compat::Secrets;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -193,7 +196,9 @@ async fn index_fresh(c: &mut Ctx) -> Result {
 }
 
 fn kit_with(config: KitConfig) -> Kit {
-    Kit::new(config, testing::crypto(), testing::frozen_clock(), AppState { name: "Campfire" })
+    static SECRETS: LazyLock<Arc<Secrets>> = LazyLock::new(|| Arc::new(Secrets::new("test-secret")));
+    let clock: SharedClock = Arc::new(TestClock::frozen_at("2024-06-01T12:00:00Z".parse().unwrap()));
+    Kit::new(config, SECRETS.clone(), clock, AppState { name: "Campfire" })
 }
 
 fn app_with(config: KitConfig) -> Router {
