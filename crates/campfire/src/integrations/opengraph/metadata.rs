@@ -4,6 +4,7 @@
 use campfire_richtext::dom::Dom;
 use campfire_richtext::sanitizer::{self, SafeList};
 use campfire_richtext::uri::{self, UriError};
+use rails_compat::json;
 
 use super::document::{self, is_blank};
 use super::location::Location;
@@ -63,8 +64,7 @@ impl Metadata {
     pub fn to_json(&self) -> String {
         let mut json = String::from("{");
         for (key, value) in &self.attributes {
-            let value = value.as_deref().map(json_string).unwrap_or_else(|| "null".into());
-            json.push_str(&format!("{}:{value},", json_string(key)));
+            json.push_str(&format!("{}:{},", json::encode(key), json::encode(value)));
         }
         json.push_str(r#""context_for_validation":{"context":null},"errors":{}}"#);
         json
@@ -147,12 +147,6 @@ fn strip_tags(html: &str) -> Result<String, UnfurlError> {
 /// `sanitize` (Rails::HTML5::SafeListSanitizer with its default allowlist).
 fn sanitize(html: &str) -> Result<String, UnfurlError> {
     sanitizer::sanitize(html, &SafeList::defaults()).map_err(|_| UnfurlError::Raised("ArgumentError"))
-}
-
-/// A string as `ActiveSupport::JSON` encodes it: JSON with `<`, `>` and `&` escaped (Rails 8.2
-/// defaults leave U+2028 and U+2029 alone).
-pub fn json_string(s: &str) -> String {
-    serde_json::to_string(s).expect("strings encode").replace('<', "\\u003c").replace('>', "\\u003e").replace('&', "\\u0026")
 }
 
 #[cfg(test)]

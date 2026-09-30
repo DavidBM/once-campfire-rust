@@ -174,11 +174,39 @@ fn webhook_payload() {
     let message = t.read(|c| Message::find(c, id("first")));
     let webhook = t.read(|c| Ok(Webhook::find_by_user(c, id("bender"))?.unwrap()));
     let payload = t.read(|c| webhook.payload(c, &BasicRichText, &message, "/rooms/1/bot/key/messages", "/rooms/1/@2"));
-    let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
-    assert_eq!(json["user"], serde_json::json!({ "id": id("jason"), "name": "Jason" }));
-    assert_eq!(json["room"], serde_json::json!({ "id": id("designers"), "name": "Designers", "path": "/rooms/1/bot/key/messages" }));
-    assert_eq!(json["message"]["body"], serde_json::json!({ "html": "First post!", "plain": "First post!" }));
-    assert!(payload.starts_with(r#"{"user":{"id":"#));
+    let (jason, designers) = (id("jason"), id("designers"));
+    assert_eq!(
+        payload,
+        format!(
+            r#"{{"user":{{"id":{jason},"name":"Jason"}},"room":{{"id":{designers},"name":"Designers","path":"/rooms/1/bot/key/messages"}},"message":{{"id":{},"body":{{"html":"First post!","plain":"First post!"}},"path":"/rooms/1/@2"}}}}"#,
+            message.id
+        )
+    );
+}
+
+/// `ActiveSupport::JSON` escapes `<`, `>` and `&`, and an unnamed room's name is `null`.
+#[test]
+fn webhook_payload_escapes_html_entities() {
+    let t = TestDb::new();
+    let (first, designers) = (id("first"), id("designers"));
+    t.write(move |tx| {
+        tx.conn().execute("UPDATE rooms SET name = NULL WHERE id = ?", [designers])?;
+        tx.conn().execute(
+            "UPDATE action_text_rich_texts SET body = '<p>Tom & Jerry</p>' WHERE record_type = 'Message' AND record_id = ?",
+            [first],
+        )?;
+        Ok(())
+    });
+    let message = t.read(|c| Message::find(c, first));
+    let webhook = t.read(|c| Ok(Webhook::find_by_user(c, id("bender"))?.unwrap()));
+    let payload = t.read(|c| webhook.payload(c, &BasicRichText, &message, "/rooms/1/bot/key/messages", "/rooms/1/@2"));
+    assert_eq!(
+        payload,
+        format!(
+            r#"{{"user":{{"id":{},"name":"Jason"}},"room":{{"id":{designers},"name":null,"path":"/rooms/1/bot/key/messages"}},"message":{{"id":{first},"body":{{"html":"\u003cp\u003eTom \u0026 Jerry\u003c/p\u003e","plain":"Tom \u0026 Jerry"}},"path":"/rooms/1/@2"}}}}"#,
+            id("jason")
+        )
+    );
 }
 
 // User::Role

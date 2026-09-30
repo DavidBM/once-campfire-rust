@@ -505,7 +505,7 @@ fn users_partials() {
 
     let name = "user_json";
     let jz = user(name, "JZ");
-    let json = h::to_rails_json(&campfire_views::messages::json::UserJson {
+    let json = rails_compat::json::encode(&campfire_views::messages::json::UserJson {
         id: jz["id"].as_i64().unwrap(),
         name: "JZ".into(),
         role: jz["role"].as_str().unwrap().into(),

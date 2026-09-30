@@ -416,6 +416,7 @@ dependencies = [
  "crc32fast",
  "hex",
  "jiff",
+ "rails_compat",
  "rand 0.9.5",
  "rusqlite",
  "serde_json",
@@ -480,6 +481,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "html5ever",
+ "rails_compat",
  "regex",
  "serde_json",
  "thiserror",
@@ -516,6 +518,7 @@ dependencies = [
  "campfire_routes",
  "html5ever",
  "jiff",
+ "rails_compat",
  "serde",
  "serde_json",
 ]

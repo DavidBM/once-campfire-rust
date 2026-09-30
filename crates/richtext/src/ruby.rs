@@ -83,30 +83,6 @@ pub fn url_encode(s: &str) -> String {
     out
 }
 
-/// Active Support's `String#to_json` with `escape_html_entities_in_json` on.
-pub fn to_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            '<' => out.push_str("\\u003c"),
-            '>' => out.push_str("\\u003e"),
-            '&' => out.push_str("\\u0026"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// Ruby's `JSON.parse`, which (unlike serde_json) also skips `/* */` and `//` comments.
 pub fn json_parse(s: &str) -> Option<Value> {
     serde_json::from_str(&strip_json_comments(s)?).ok()
@@ -349,10 +325,6 @@ mod tests {
         assert_eq!(ruby_float_to_s(1.5e16), "1.5e+16");
         assert_eq!(ruby_float_to_s(0.1), "0.1");
         assert_eq!(ruby_float_to_s(0.0001), "0.0001");
-        assert_eq!(
-            to_json_string("<a href=\"x\">&'\u{2028}é\n\t\u{1}\u{7f}/</a>"),
-            "\"\\u003ca href=\\\"x\\\"\\u003e\\u0026'\u{2028}é\\n\\t\\u0001\u{7f}/\\u003c/a\\u003e\""
-        );
         assert_eq!(string_inspect("#{a} #$b #@c # #"), r##""\#{a} \#$b \#@c # #""##);
         assert_eq!(json_parse("{\"a\":1/*c*/}").unwrap()["a"], 1);
         assert!(json_parse("{\"a\":1,}").is_none());
