@@ -2,7 +2,7 @@
 //! sign in on another device with a user's transfer link.
 
 use campfire_db::User;
-use campfire_kit::{Ctx, Error, Result, StatusCode, format};
+use campfire_kit::{Ctx, Result, StatusCode, format};
 use campfire_views::sessions;
 
 use crate::app::AppCtx;
@@ -25,7 +25,7 @@ pub async fn update(c: &mut Ctx) -> Result {
     let user_id = presenters::accounts::user_id_from_transfer_id(&c.app().secrets, &transfer_id, c.now());
     // `User.active.find_by_transfer_id(params[:id])`
     let user = match user_id {
-        Some(id) => c.app().db.read(move |conn| Ok(User::find_by_id(conn, id)?.filter(User::is_active))).await.map_err(Error::internal)?,
+        Some(id) => c.app().read(move |conn| Ok(User::find_by_id(conn, id)?.filter(User::is_active))).await?,
         None => None,
     };
     match user {

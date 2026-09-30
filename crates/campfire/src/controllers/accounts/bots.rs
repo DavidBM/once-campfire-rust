@@ -19,10 +19,8 @@ pub async fn index(c: &mut Ctx) -> Result {
     let secrets = c.app().secrets.clone();
     let bots: Vec<_> = c
         .app()
-        .db
         .read(move |conn| User::active_bots_ordered(conn)?.iter().map(|bot| presenters::accounts::bot(conn, &secrets, bot)).collect())
-        .await
-        .map_err(Error::internal)?;
+        .await?;
     framed_page!(c, StatusCode::OK, |ctx| accounts::BotsIndex { ctx, bots: bots.clone() }).await
 }
 
@@ -46,13 +44,11 @@ pub async fn create(c: &mut Ctx) -> Result {
     let avatar = Assignment::from_params(&params, "avatar")?.stage(c.app()).await?;
     let pending = c
         .app()
-        .db
         .write(move |tx| {
             let bot = User::create_bot(tx, &name, webhook_url.as_deref())?;
             attachments::assign(tx, Record::user(bot.id), "avatar", avatar)
         })
-        .await
-        .map_err(Error::internal)?;
+        .await?;
     attachments::analyze_later(c.app(), pending);
     redirect_to_bots(c)
 }
@@ -62,8 +58,7 @@ pub async fn edit(c: &mut Ctx) -> Result {
     let bot = set_bot(c).await?;
     c.respond_to(&[&format::HTML])?;
     let (storage, base_url, bot_id) = (c.app().storage.clone(), c.url_for(""), bot.id);
-    let form =
-        c.app().db.read(move |conn| presenters::accounts::bot_form(conn, &storage, &base_url, &bot)).await.map_err(Error::internal)?;
+    let form = c.app().read(move |conn| presenters::accounts::bot_form(conn, &storage, &base_url, &bot)).await?;
     framed_page!(c, StatusCode::OK, |ctx| accounts::BotsEdit { ctx, bot_id, bot: form.clone() }).await
 }
 
@@ -77,13 +72,11 @@ pub async fn update(c: &mut Ctx) -> Result {
     let avatar = Assignment::from_params(&params, "avatar")?.stage(c.app()).await?;
     let pending = c
         .app()
-        .db
         .write(move |tx| {
             bot.update_bot(tx, changes, webhook_url.as_deref())?;
             attachments::assign(tx, Record::user(bot.id), "avatar", avatar)
         })
-        .await
-        .map_err(Error::internal)?;
+        .await?;
     attachments::analyze_later(c.app(), pending);
     redirect_to_bots(c)
 }
@@ -92,7 +85,7 @@ pub async fn update(c: &mut Ctx) -> Result {
 pub async fn destroy(c: &mut Ctx) -> Result {
     before(c).await?;
     let mut bot = set_bot(c).await?;
-    c.app().db.write(move |tx| bot.deactivate(tx)).await.map_err(Error::internal)?;
+    c.app().write(move |tx| bot.deactivate(tx)).await?;
     redirect_to_bots(c)
 }
 
@@ -109,16 +102,7 @@ async fn set_bot(c: &Ctx) -> Result<User> {
 
 pub(crate) async fn find_active_bot(c: &Ctx, key: &str) -> Result<User> {
     let id = c.param_str(key).and_then(cast_integer).ok_or(Error::NotFound)?;
-    c.app()
-        .db
-        .read(move |conn| match User::find_active_bot(conn, id) {
-            Ok(bot) => Ok(Some(bot)),
-            Err(campfire_db::Error::RecordNotFound(_)) => Ok(None),
-            Err(error) => Err(error),
-        })
-        .await
-        .map_err(Error::internal)?
-        .ok_or(Error::NotFound)
+    c.app().read(move |conn| User::find_active_bot(conn, id)).await
 }
 
 /// `params.require(:user).permit(:name, :avatar, :webhook_url)`

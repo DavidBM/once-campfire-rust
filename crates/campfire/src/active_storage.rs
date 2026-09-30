@@ -10,11 +10,11 @@
 
 use std::sync::{Arc, LazyLock};
 
-use campfire_db::CachedStatements;
+use campfire_db::{CachedStatements, query_all};
 use campfire_kit::{Ctx, Error, ExpiresIn, Freshness, Response, Result, SendOptions, StatusCode, halt, http::header};
 use campfire_storage::file_server::{self, BodyPart};
 use campfire_storage::{Blob, Filename, Json, Staged, Storage, Variation, content_types, disk, paths};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use tokio::sync::Semaphore;
 
 use crate::app::{App, AppCtx};
@@ -87,7 +87,7 @@ async fn set_blob(c: &mut Ctx) -> Result<Blob> {
     let Some(blob_id) = paths::verify_signed_blob_id(&storage.verifier, &signed_id, c.now()) else {
         return halt(head(StatusCode::NOT_FOUND));
     };
-    c.app().db.read(move |conn| Blob::find(conn, blob_id).map_err(storage_error)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
+    c.app().read(move |conn| Blob::find(conn, blob_id).map_err(storage_error)).await?.ok_or(Error::NotFound)
 }
 
 /// `set_representation`: `@blob.representation(params[:variation_key]).processed`. A bad
@@ -141,8 +141,8 @@ pub(crate) async fn processed_variant_with(
 ) -> Result<Blob> {
     let storage = app.storage.clone();
     let (source, digested) = (blob.clone(), variation.clone());
-    let existing = app.db.read(move |conn| storage.existing_variant(conn, &source, &digested).map_err(storage_error)).await;
-    if let Some(image) = existing.map_err(Error::internal)? {
+    let existing = app.read(move |conn| storage.existing_variant(conn, &source, &digested).map_err(storage_error)).await?;
+    if let Some(image) = existing {
         return Ok(image);
     }
 
@@ -151,31 +151,29 @@ pub(crate) async fn processed_variant_with(
     let image = process_media(move || transform(&storage, &source, &digested)).await?;
 
     let storage = app.storage.clone();
-    app.db
-        .write(move |tx| {
-            let conn = tx.conn();
-            match storage.record_variant(conn, &blob, &variation, &image, tx.now().jiff()).map_err(storage_error)? {
-                Some(recorded) => {
-                    keep_after_commit(tx, image);
-                    Ok(recorded)
-                }
-                // Another request recorded it first; ours is dropped (and its file deleted).
-                None => storage
-                    .existing_variant(conn, &blob, &variation)
-                    .map_err(storage_error)?
-                    .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::VariantRecord")),
+    app.write(move |tx| {
+        let conn = tx.conn();
+        match storage.record_variant(conn, &blob, &variation, &image, tx.now().jiff()).map_err(storage_error)? {
+            Some(recorded) => {
+                keep_after_commit(tx, image);
+                Ok(recorded)
             }
-        })
-        .await
-        .map_err(Error::internal)
+            // Another request recorded it first; ours is dropped (and its file deleted).
+            None => storage
+                .existing_variant(conn, &blob, &variation)
+                .map_err(storage_error)?
+                .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::VariantRecord")),
+        }
+    })
+    .await
 }
 
 /// `blob.preview_image`, drawing it with ffmpeg off the writer when it's missing.
 async fn preview_image(app: &App, blob: Blob) -> Result<Blob> {
     let storage = app.storage.clone();
     let source = blob.clone();
-    let existing = app.db.read(move |conn| storage.existing_preview_image(conn, &source).map_err(storage_error)).await;
-    if let Some(image) = existing.map_err(Error::internal)? {
+    let existing = app.read(move |conn| storage.existing_preview_image(conn, &source).map_err(storage_error)).await?;
+    if let Some(image) = existing {
         return Ok(image);
     }
 
@@ -184,22 +182,20 @@ async fn preview_image(app: &App, blob: Blob) -> Result<Blob> {
     let image = process_media(move || storage.draw_preview_image(&source)).await?;
 
     let storage = app.storage.clone();
-    app.db
-        .write(move |tx| {
-            let conn = tx.conn();
-            match storage.record_preview_image(conn, &blob, &image, tx.now().jiff()).map_err(storage_error)? {
-                Some(recorded) => {
-                    keep_after_commit(tx, image);
-                    Ok(recorded)
-                }
-                None => storage
-                    .existing_preview_image(conn, &blob)
-                    .map_err(storage_error)?
-                    .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::Blob")),
+    app.write(move |tx| {
+        let conn = tx.conn();
+        match storage.record_preview_image(conn, &blob, &image, tx.now().jiff()).map_err(storage_error)? {
+            Some(recorded) => {
+                keep_after_commit(tx, image);
+                Ok(recorded)
             }
-        })
-        .await
-        .map_err(Error::internal)
+            None => storage
+                .existing_preview_image(conn, &blob)
+                .map_err(storage_error)?
+                .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::Blob")),
+        }
+    })
+    .await
 }
 
 /// What `blob.analyze` would save, worked out off the writer.
@@ -300,7 +296,7 @@ fn send_blob_byte_range_data(c: &mut Ctx, blob: &Blob, range: &str) -> Result {
     };
     let path = storage.path_for(blob);
     if !path.is_file() {
-        return Err(storage_error_to_kit(campfire_storage::Error::FileNotFound));
+        return Err(Error::internal(campfire_storage::Error::FileNotFound));
     }
     let content_type_for_serving = content_types::for_serving(blob.content_type()).to_string();
     let (content_type, parts, content_range) = if let [(start, end)] = ranges[..] {
@@ -499,7 +495,7 @@ pub async fn direct_uploads_create(c: &mut Ctx) -> Result {
         byte_size,
         checksum: checksum.clone(),
     };
-    let blob = c.app().db.write(move |tx| new_blob.insert(tx.conn(), now).map_err(storage_error)).await.map_err(Error::internal)?;
+    let blob = c.app().write(move |tx| new_blob.insert(tx.conn(), now).map_err(storage_error)).await?;
 
     let expires_at = now + jiff::SignedDuration::from_secs(SERVICE_URLS_EXPIRE_IN);
     let url = c.url_for(&storage.service.url_path_for_direct_upload(
@@ -576,7 +572,8 @@ pub async fn purge(app: &App, blob_id: i64) -> anyhow::Result<()> {
             }
             let mut dependents = Vec::new();
             // before_destroy { variant_records.destroy_all }: each record's image attachment goes too.
-            let variant_records: Vec<i64> = query_ids(conn, "SELECT id FROM active_storage_variant_records WHERE blob_id = ?1", blob_id)?;
+            let variant_records: Vec<i64> =
+                query_all(conn, "SELECT id FROM active_storage_variant_records WHERE blob_id = ?1", [blob_id], |row| row.get(0))?;
             for record_id in variant_records {
                 dependents.extend(destroy_attachment(conn, "ActiveStorage::VariantRecord", record_id, "image")?);
                 conn.execute_cached("DELETE FROM active_storage_variant_records WHERE id = ?1", [record_id])?;
@@ -610,28 +607,20 @@ fn destroy_attachment(conn: &rusqlite::Connection, record_type: &str, record_id:
             params![record_type, record_id, name],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map(Some)
-        .or_else(|error| if error == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(error) })?;
+        .optional()?;
     let Some((id, blob_id)) = attachment else { return Ok(None) };
     conn.execute_cached("DELETE FROM active_storage_attachments WHERE id = ?1", [id])?;
     Ok(Some(blob_id))
 }
 
-fn query_ids(conn: &rusqlite::Connection, sql: &str, id: i64) -> campfire_db::Result<Vec<i64>> {
-    let mut statement = conn.prepare_cached(sql)?;
-    let ids = statement.query_map([id], |row| row.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
-    Ok(ids)
-}
-
-fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
+/// A storage error inside a database closure. SQLite's own errors stay `Error::Sqlite`, so that
+/// `is_record_not_unique` sees them. (Neither crate depends on the other, so this can't be a
+/// `From` impl.)
+pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
     match error {
         campfire_storage::Error::Sql(error) => error.into(),
-        other => campfire_db::Error::Other(other.to_string()),
+        other => campfire_db::Error::other(other),
     }
-}
-
-fn storage_error_to_kit(error: campfire_storage::Error) -> Error {
-    Error::internal(error)
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -643,6 +632,17 @@ fn random_hex(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A unique index refusing a blob or attachment row inside `User.create!` is rescued as
+    /// `ActiveRecord::RecordNotUnique`, like the user row's own.
+    #[test]
+    fn storage_errors_keep_sqlites_own() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE blobs (key TEXT UNIQUE); INSERT INTO blobs VALUES ('a')").unwrap();
+        let unique = conn.execute("INSERT INTO blobs VALUES ('a')", []).unwrap_err();
+        assert!(storage_error(campfire_storage::Error::Sql(unique)).is_record_not_unique());
+        assert!(matches!(storage_error(campfire_storage::Error::FileNotFound), campfire_db::Error::Other(_)));
+    }
 
     #[tokio::test]
     async fn byte_ranges_are_not_read_into_memory() {

@@ -45,6 +45,27 @@ async fn inaccessible_rooms_redirect_home_with_an_alert() {
     assert_eq!(reply.status, StatusCode::FOUND);
 }
 
+/// `@membership.room` is nil for a membership whose room is gone, and Rails fails on it: a 500,
+/// not the 404 of a membership that isn't there.
+#[tokio::test]
+async fn a_membership_of_a_missing_room_is_a_server_error() {
+    let Some(app) = TestApp::boot().await else { return };
+    let missing_room = 999_999;
+    app.db()
+        .write(move |tx| {
+            tx.conn().execute(
+                "INSERT INTO memberships (room_id, user_id, created_at, updated_at) VALUES (?1, ?2, '2026-01-01', '2026-01-01')",
+                [missing_room, DAVID],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut david = app.david();
+    assert_eq!(david.get(&format!("/rooms/{missing_room}/messages")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(david.get(&format!("/rooms/{}/messages", missing_room + 1)).await.status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn index_redirects_to_the_last_room() {
     let Some(app) = TestApp::boot().await else { return };

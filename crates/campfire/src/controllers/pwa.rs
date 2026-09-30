@@ -26,7 +26,7 @@ pub async fn service_worker(c: &mut Ctx) -> Result {
 pub async fn manifest(c: &mut Ctx) -> Result {
     concerns::before_actions(c, before()).await?;
     c.respond_to(&[&format::JSON])?;
-    let account = c.app().db.read(Account::first).await.map_err(Error::internal)?;
+    let account = c.app().read(Account::first).await?;
     let asset_path = |path: &str| campfire_assets::asset_path(path);
     let manifest = pwa::Manifest {
         account_name: account.as_ref().map(|account| account.name.clone()),
