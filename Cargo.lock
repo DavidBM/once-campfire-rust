@@ -381,6 +381,7 @@ name = "campfire_assets"
 version = "0.1.0"
 dependencies = [
  "fancy-regex",
+ "ruby_compat",
  "serde_json",
  "sha1",
  "sha2",
@@ -398,6 +399,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rails_compat",
+ "ruby_compat",
  "serde",
  "serde_json",
  "sha1",
@@ -481,6 +483,7 @@ dependencies = [
  "html5ever",
  "rails_compat",
  "regex",
+ "ruby_compat",
  "serde_json",
  "thiserror",
 ]
@@ -515,6 +518,7 @@ dependencies = [
  "html5ever",
  "jiff",
  "rails_compat",
+ "ruby_compat",
  "serde",
  "serde_json",
 ]

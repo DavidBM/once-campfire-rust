@@ -1,22 +1,6 @@
-//! Ruby and Active Support string behaviors the pipeline depends on.
+//! Ruby and Active Support string behaviors the pipeline depends on, beyond `ruby_compat`'s.
 
 use serde_json::Value;
-
-/// `ERB::Util.html_escape` (and `h`): escapes `& < > " '`.
-pub fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
 
 /// Ruby's whitespace for `String#strip`: NUL, `\t`, `\n`, `\v`, `\f`, `\r` and space.
 fn is_strip_whitespace(c: char) -> bool {

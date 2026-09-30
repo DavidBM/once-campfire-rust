@@ -13,6 +13,7 @@ workspace = true
 # (see vendor/html5ever/Cargo.toml and the workspace Cargo.toml).
 html5ever.workspace = true
 rails_compat.workspace = true
+ruby_compat.workspace = true
 serde_json.workspace = true
 regex.workspace = true
 thiserror.workspace = true

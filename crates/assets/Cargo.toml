@@ -10,9 +10,11 @@ build = "build.rs"
 workspace = true
 
 [dependencies]
+ruby_compat.workspace = true
 
 [build-dependencies]
 fancy-regex.workspace = true
+ruby_compat.workspace = true
 sha1.workspace = true
 
 [dev-dependencies]

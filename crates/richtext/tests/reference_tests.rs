@@ -107,7 +107,7 @@ fn unfurled_tweet_with_an_avatar_image_in_a_lexxy_body_gets_the_twitter_avatar_t
     let content = "<actiontext-opengraph-embed><div class=\"og-embed gap\"><div class=\"og-embed__content\"><div class=\"og-embed__title\"><a href=\"https://twitter.com/x/status/1\">Tweet</a></div><div class=\"og-embed__description\">desc</div></div><div class=\"og-embed__image\"><img src=\"https://pbs.twimg.com/profile_images/x.jpg\" class=\"image center\" alt=\"\" /></div></div></actiontext-opengraph-embed>";
     let body = format!(
         "<p><a href=\"https://twitter.com/x/status/1\">https://twitter.com/x/status/1</a></p><action-text-attachment content-type=\"application/vnd.actiontext.opengraph-embed\" content=\"{}\"></action-text-attachment>",
-        campfire_richtext::ruby::html_escape(content)
+        ruby_compat::erb::html_escape(content)
     );
     assert!(presentation(&body).contains("og-embed--twitter-avatar"));
 }
@@ -267,7 +267,7 @@ fn editable_body_rebuilds_a_hand_written_embed_from_its_validated_details() {
     let content = "<actiontext-opengraph-embed data-controller=\"pwn\" data-action=\"click->pwn#run\"> <div class=\"og-embed\"><div class=\"og-embed__title\"><a href=\"/rooms/1\">Free cookies</a></div> <div class=\"og-embed__image\"><img src=\"/rooms/1/avatar\" data-action=\"load->pwn#run\"></div></div> </actiontext-opengraph-embed>";
     let body = format!(
         "<p><action-text-attachment content-type=\"application/vnd.actiontext.opengraph-embed\" url=\"https://example.com/image.png\" content=\"{}\"></action-text-attachment></p>",
-        campfire_richtext::ruby::html_escape(content)
+        ruby_compat::erb::html_escape(content)
     );
     let (_, rebuilt) = editable_attachment(&body);
     assert!(rebuilt.contains("Free cookies"));

@@ -8,29 +8,11 @@
 use std::fmt::{self, Write};
 
 pub use askama::filters::Safe;
+/// `ERB::Util.html_escape`, into a new string or onto the end of one.
+pub use ruby_compat::erb::{html_escape as escape, push_html_escaped as push_escaped};
 
 /// An html_safe string.
 pub type Html = Safe<String>;
-
-/// Escapes like `ERB::Util.html_escape`.
-pub fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    push_escaped(&mut out, text);
-    out
-}
-
-pub fn push_escaped(out: &mut String, text: &str) {
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-}
 
 /// `raw` / `String#html_safe`.
 pub fn raw(html: impl AsRef<str>) -> Html {
@@ -52,30 +34,6 @@ pub struct ErbEscaper;
 
 impl askama::filters::Escaper for ErbEscaper {
     fn write_escaped_str<W: Write>(&self, mut dest: W, string: &str) -> fmt::Result {
-        let mut last = 0;
-        for (index, byte) in string.bytes().enumerate() {
-            let replacement = match byte {
-                b'&' => "&amp;",
-                b'<' => "&lt;",
-                b'>' => "&gt;",
-                b'"' => "&quot;",
-                b'\'' => "&#39;",
-                _ => continue,
-            };
-            dest.write_str(&string[last..index])?;
-            dest.write_str(replacement)?;
-            last = index + 1;
-        }
-        dest.write_str(&string[last..])
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn escapes_like_erb_util() {
-        assert_eq!(escape(r#"<&>"'x"#), "&lt;&amp;&gt;&quot;&#39;x");
+        ruby_compat::erb::write_html_escaped(&mut dest, string)
     }
 }

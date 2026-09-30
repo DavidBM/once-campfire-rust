@@ -5,6 +5,7 @@
 
 use crate::embedded;
 use crate::helpers::stylesheet_path;
+use ruby_compat::erb::html_escape;
 
 /// What `stylesheet_link_tag` renders, plus the preload links Rails adds to the response's
 /// `link` header while rendering it (`config.action_view.preload_links_header`, on by default).
@@ -39,9 +40,9 @@ pub fn stylesheet_link_tag(sources: &[&str], options: &[(&str, &str)]) -> Styles
             preload_links.push(format!("<{href}>; rel=preload; as=style; nopush"));
         }
 
-        let mut tag = format!("<link rel=\"stylesheet\" href=\"{}\"", escape_html(&href));
+        let mut tag = format!("<link rel=\"stylesheet\" href=\"{}\"", html_escape(&href));
         for (name, value) in options {
-            tag.push_str(&format!(" {name}=\"{}\"", escape_html(value)));
+            tag.push_str(&format!(" {name}=\"{}\"", html_escape(value)));
         }
         tag.push_str(" />");
         html.push(tag);
@@ -71,20 +72,4 @@ pub fn append_preload_links(header: &str, preload_links: &[String]) -> String {
 /// `import "application"` module script. Computed at build time from config/importmap.rb.
 pub fn javascript_importmap_tags() -> &'static str {
     embedded::IMPORTMAP_TAGS
-}
-
-/// ERB::Util.html_escape
-fn escape_html(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            c => out.push(c),
-        }
-    }
-    out
 }
