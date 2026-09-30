@@ -58,7 +58,7 @@ pub fn message_presentation(body: &str, ctx: &RenderContext) -> Result<String, E
     let content = Content::load(body, ctx)?;
     let filtered = filters::apply(content, ctx)?;
     let rendered = filtered.to_rendered_html_with_layout(ctx)?;
-    autolink::auto_link(&rendered, &SafeList::auto_link()).map_err(Error::Parse)
+    autolink::auto_link(&rendered, SafeList::auto_link()).map_err(Error::Parse)
 }
 
 /// `message_presentation` with its rescue: an exception renders as an empty string, unless logging

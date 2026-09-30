@@ -97,7 +97,7 @@ pub fn sanitize_tags(content: Content) -> Content {
 
 /// Scrubs attributes with Rails' safe-list sanitizer over SanitizeTags' own tags.
 pub fn sanitize_attributes(content: Content) -> Result<Content, Error> {
-    let html = sanitizer::sanitize(&content.to_html(), &SafeList::content_filter()).map_err(Error::Parse)?;
+    let html = sanitizer::sanitize(&content.to_html(), SafeList::content_filter()).map_err(Error::Parse)?;
     Content::wrap(&html)
 }
 
