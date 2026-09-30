@@ -196,11 +196,14 @@ fn static_response(request: &axum::extract::Request) -> Option<axum::response::R
         range: header(axum::http::header::RANGE),
         if_modified_since: header(axum::http::header::IF_MODIFIED_SINCE),
     })?;
-    let mut response = axum::response::Response::new(axum::body::Body::from(served.body.into_owned()));
+    // A borrowed body is the embedded file (or a range of it), sent as `Bytes::from_static`
+    // without a copy; only a multipart range body is owned.
+    let mut response = axum::response::Response::new(axum::body::Body::from(served.body));
     *response.status_mut() = axum::http::StatusCode::from_u16(served.status).unwrap_or(axum::http::StatusCode::OK);
     response.extensions_mut().insert(campfire_kit::deflater::StaticFile);
+    // `try_from` a String keeps its buffer (and checks it as `from_str` does, which copies).
     for (name, value) in served.headers {
-        if let (Ok(name), Ok(value)) = (axum::http::HeaderName::from_bytes(name.as_bytes()), axum::http::HeaderValue::from_str(&value)) {
+        if let (Ok(name), Ok(value)) = (axum::http::HeaderName::from_bytes(name.as_bytes()), axum::http::HeaderValue::try_from(value)) {
             response.headers_mut().append(name, value);
         }
     }
