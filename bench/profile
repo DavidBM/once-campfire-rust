@@ -5,7 +5,7 @@ kernel.perf_event_paranoid=2 rules out perf and samply for unprivileged users:
   bench/profile cpu   --label base [--targets room_show,messages_page,post_message_c1,post_message,cable1000] [--secs 10]
   bench/profile alloc --label base [--route room_show] [--requests 1000]
   bench/profile heap  --label base [--clients 1000]
-  (all take --out DIR; default bench/results/profile-<stamp>)
+  (all take --out DIR, default bench/results/profile-<stamp>, and --user-agent UA as in bench/attrib)
 
 cpu:   LD_PRELOAD gperftools' libprofiler.so (SIGPROF sampling at 1 kHz, libunwind stacks),
        toggled with SIGUSR2 around each target's load window, then bench/lib/cpuprof.py renders
@@ -36,7 +36,9 @@ p.add_argument("--route", default="room_show")
 p.add_argument("--requests", type=int, default=1000)
 p.add_argument("--clients", default="1000")
 p.add_argument("--out")
+p.add_argument("--user-agent", help="User-Agent for every loadgen request (default: none)")
 a = p.parse_args()
+b.USER_AGENT = a.user_agent
 
 out = os.path.abspath(a.out or os.path.join(b.BENCH, "results", "profile-" + time.strftime("%Y%m%d-%H%M%S")))
 os.makedirs(out, exist_ok=True)
@@ -56,7 +58,7 @@ def with_preload(lib, env):
 def run_cable_toggled(app, sess, clients, on_phase):
     """Runs the cable fan-out, calling on_phase(name) as loadgen reports each phase."""
     args = [b.LOADGEN, "cable", "--base", app.base, "--cookie", sess["cookie"], "--room", sess["room"], "--csrf", sess["csrf"],
-            "--streams", sess["streams"], "--clients", clients, "--tput-secs", "15", "--posters", "4"]
+            "--streams", sess["streams"], "--clients", clients, "--tput-secs", "15", "--posters", "4", *b.user_agent_args()]
     proc = subprocess.Popen(["taskset", "-c", b.LOADGEN_CPUS, *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for line in proc.stderr:
         if line.startswith("PHASE "):

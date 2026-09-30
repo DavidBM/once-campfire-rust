@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Benchmark the reference (Rails) app against the Rust port on the same seed and CPUs.
 #
-#   bench/run [--apps reference,rust[,rust-identity]] [--reps 3] [--out DIR]
+#   bench/run [--apps reference,rust[,rust-identity]] [--reps 3] [--out DIR] [--user-agent UA]
 #   bench/report DIR            # median + spread table from a results dir
 #
 # Each rep, for each app in turn (never two at once; the order alternates between reps): a fresh
@@ -14,6 +14,10 @@
 #
 # `rust-identity` is the Rust image again, running only the HTTP suite with
 # `Accept-Encoding: identity`: the app's cost without gzip.
+#
+# The load generator sends no User-Agent unless given one with --user-agent, which it then sends on
+# every request; a desktop Chrome, say:
+#   --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 #
 # Images (unmodified production images, not the parity ones: no libfaketime, no pinned cable pool,
 # the reference's own resque-pool.yml):
@@ -58,12 +62,13 @@ RUST_EXTRA_ENV=${RUST_EXTRA_ENV-}
 BASE=http://127.0.0.1:$PORT
 LOADGEN=$ROOT/target/bench/release/loadgen
 
-APPS=reference,rust REPS=3 OUT=""
+APPS=reference,rust REPS=3 OUT="" USER_AGENT_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --apps) APPS=$2; shift 2 ;;
     --reps) REPS=$2; shift 2 ;;
     --out)  OUT=$2; shift 2 ;;
+    --user-agent) USER_AGENT_ARGS=(--user-agent "$2"); shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -74,7 +79,7 @@ CONTAINER=bench-campfire-$PORT
 
 log() { echo "[$(date +%T)] $*" >&2; }
 label() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$LABELS" "$1"; }
-lg() { taskset -c "$LOADGEN_CPUS" "$LOADGEN" "$@"; }
+lg() { taskset -c "$LOADGEN_CPUS" "$LOADGEN" "$@" "${USER_AGENT_ARGS[@]}"; }
 
 teardown() {
   [ -n "${SAMPLER:-}" ] && kill "$SAMPLER" 2>/dev/null || true
@@ -262,6 +267,7 @@ PY
   echo "server cpus: $SERVER_CPUS (nproc $(taskset -c "$SERVER_CPUS" nproc)); loadgen cpus: $LOADGEN_CPUS; network: $NETWORK"
   echo "env: $(env_args | grep -E 'WEB_CONC|JOB_CONC|MAX_THREADS' | tr '\n' ' ')"
   echo "rust extra env: $RUST_EXTRA_ENV"
+  echo "user agent: ${USER_AGENT_ARGS[1]:-(none)}"
   for app in ${APPS//,/ }; do echo "$app image: $(image_for "$app") $(docker image inspect -f '{{.Id}} {{.Created}}' "$(image_for "$app")")"; done
   echo "rust HEAD: $(git -C "$ROOT" rev-parse --short HEAD) (dirty: $(git -C "$ROOT" status --porcelain -- crates Cargo.toml Cargo.lock | wc -l) files)"
 } > "$OUT/env.txt"

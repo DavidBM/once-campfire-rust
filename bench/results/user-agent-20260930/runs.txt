@@ -1,0 +1,280 @@
+time_user_agent_work, ns per call (median of 9 runs of 100,000 calls), release profile, CPUs 20-23; the '#' lines give the 1-, 5- and 15-minute load averages (other agents were building)
+
+# Final: the baseline (d93d3dd + 063ec97) and ed75dc0, alternating
+# before rep 1: 6.36 6.43 7.68
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           885     1093      881      411         2397
+Chrome, Windows         855     1065      871      358         2399
+Chrome, Android         990     1219     1007      418         2812
+Safari, macOS          1049     1301     1064      585         2940
+Safari, iPhone         1219     1492     1566      519         3379
+Firefox, Windows        732      959      733      497         2231
+Edge, Windows          1072     1293     1082      392         2840
+Googlebot               451      679      451      633         1891
+none                    235        1      246      510          790
+# step5 rep 1: 6.41 6.43 7.62
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           224      380      221      170          601
+Chrome, Windows         234      393      231      133          587
+Chrome, Android         277      470      288      150          652
+Safari, macOS           240      512      243      212          821
+Safari, iPhone          315      545      302      170          784
+Firefox, Windows        217      387      221      117          544
+Edge, Windows           253      454      273      133          610
+Googlebot               183      272      180      160          500
+none                     97        2       98       78          202
+# before rep 2: 7.31 6.62 7.66
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           914     1149      987      465         2787
+Chrome, Windows         965     1229     1141      775         2610
+Chrome, Android        1187     1443     1161      445         3034
+Safari, macOS          1055     1353     1047      561         3060
+Safari, iPhone         1337     1610     1342      601         3506
+Firefox, Windows        782     1019      754      476         2411
+Edge, Windows          1189     1385     1221      429         3257
+Googlebot               485      744      482      686         2273
+none                    261        1      260      545          844
+# step5 rep 2: 11.21 7.73 7.98
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           211      384      217      162          595
+Chrome, Windows         232      399      222      134          555
+Chrome, Android         263      454      273      145          616
+Safari, macOS           235      521      239      202          785
+Safari, iPhone          297      573      295      161          801
+Firefox, Windows        213      389      224      117          554
+Edge, Windows           248      438      270      140          629
+Googlebot               180      269      180      165          504
+none                     93        2       94       75          192
+# before rep 3: 10.35 7.71 7.97
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           968     1128      927      422         2535
+Chrome, Windows         902     1154      920      360         2506
+Chrome, Android        1090     1355     1101      423         2915
+Safari, macOS          1157     1357     1063      560         3051
+Safari, iPhone         1193     1462     1215      512         3513
+Firefox, Windows        785     1080      794      502         2988
+Edge, Windows          1253     1477     1167      410         3024
+Googlebot               475      737      491      663         1958
+none                    275        1      283      519          814
+# step5 rep 3: 12.20 8.59 8.26
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           203      373      208      154          570
+Chrome, Windows         212      375      229      127          558
+Chrome, Android         265      451      272      139          638
+Safari, macOS           247      536      276      225          835
+Safari, iPhone          299      556      297      168          779
+Firefox, Windows        221      402      239      127          636
+Edge, Windows           268      457      271      135          622
+Googlebot               187      269      183      168          505
+none                     96        1       94       76          196
+
+# Each commit as it landed (not interleaved): before, d93d3dd + 063ec97
+#  07:28:38 up 3 days, 11:17,  3 users,  load average: 5.09, 5.35, 6.12
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           891     1125      874      406         2399
+Chrome, Windows         856     1063      941      371         2496
+Chrome, Android        1014     1257     1051      411         2909
+Safari, macOS           989     1296     1032      548         2916
+Safari, iPhone         1149     1424     1161      502         3289
+Firefox, Windows        722      975      874      638         2438
+Edge, Windows          1123     1334     1127      402         2932
+Googlebot               476      733      476      656         1947
+none                    245        1      246      527          814
+#  07:29:24 up 3 days, 11:18,  3 users,  load average: 7.43, 5.94, 6.29
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           880     1089      896      424         2494
+Chrome, Windows         883     1095      894      533         2409
+Chrome, Android        1049     1221     1003      408         2725
+Safari, macOS           976     1271     1009      548         2972
+Safari, iPhone         1311     1430     1168      502         3240
+Firefox, Windows        718      973      756      474         2337
+Edge, Windows          1121     1348     1147      419         2881
+Googlebot               470      705      479      659         1912
+none                    245        1      245      514          828
+#  07:30:11 up 3 days, 11:19,  3 users,  load average: 7.41, 6.20, 6.36
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           880     1084      911      447         2538
+Chrome, Windows         913     1146      890      361         2367
+Chrome, Android        1005     1223     1008      420         2708
+Safari, macOS           987     1274      984      541         2904
+Safari, iPhone         1169     1422     1206      528         3297
+Firefox, Windows        729      972      725      465         2222
+Edge, Windows          1068     1282     1074      388         2828
+Googlebot               451      692      463      637         1873
+none                    244        1      246      506          807
+
+# 45af9c5 (byte scan)
+#  07:35:31 up 3 days, 11:24,  3 users,  load average: 6.27, 5.47, 5.90
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           339      536      328      405         1315
+Chrome, Windows         333      527      338      357         1226
+Chrome, Android         387      624      398      410         1482
+Safari, macOS           437      695      456      562         1827
+Safari, iPhone          540      762      498      493         1930
+Firefox, Windows        409      650      392      471         1537
+Edge, Windows           402      641      438      402         1504
+Googlebot               307      553      315      635         1546
+none                    160        1      161      528          680
+#  07:35:58 up 3 days, 11:25,  3 users,  load average: 14.06, 7.34, 6.50
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           323      532      342      438         1316
+Chrome, Windows         320      518      328      360         1217
+Chrome, Android         376      606      382      432         1431
+Safari, macOS           434      672      442      539         1728
+Safari, iPhone          454      704      477      464         1763
+Firefox, Windows        374      626      383      464         1505
+Edge, Windows           391      618      412      389         1475
+Googlebot               291      524      300      631         1547
+none                    157        1      156      536          692
+#  07:36:23 up 3 days, 11:25,  3 users,  load average: 19.00, 8.97, 7.06
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           321      519      344      419         1310
+Chrome, Windows         327      517      334      361         1214
+Chrome, Android         374      602      382      411         1415
+Safari, macOS           428      687      442      539         1741
+Safari, iPhone          462      704      498      476         1847
+Firefox, Windows        381      641      386      475         1549
+Edge, Windows           397      638      421      394         1469
+Googlebot               297      536      306      646         1525
+none                    155        1      157      537          685
+
+# b958f2e (ASCII compare)
+#  07:46:11 up 3 days, 11:35,  3 users,  load average: 13.62, 11.81, 9.35
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           328      458      339      312         1174
+Chrome, Windows         315      501      361      237         1541
+Chrome, Android         418      585      402      303         1297
+Safari, macOS           362      650      392      659         1763
+Safari, iPhone          386      613      391      506         1705
+Firefox, Windows        286      446      280      248         1041
+Edge, Windows           431      532      411      233         1296
+Googlebot               194      292      194      308          880
+none                    110        1      112      168          315
+#  07:46:33 up 3 days, 11:35,  3 users,  load average: 14.76, 12.24, 9.55
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           312      424      309      275         1080
+Chrome, Windows         296      434      310      218         1042
+Chrome, Android         337      499      355      397         1217
+Safari, macOS           327      557      345      550         1591
+Safari, iPhone          413      609      386      494         1712
+Firefox, Windows        290      451      295      248         1052
+Edge, Windows           383      545      389      238         1282
+Googlebot               193      299      195      316          906
+none                    459        2      487      408          319
+#  07:46:54 up 3 days, 11:36,  3 users,  load average: 18.09, 13.13, 9.89
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           318      421      313      276         1106
+Chrome, Windows         294      428      304      214         1017
+Chrome, Android         334      496      345      241         1200
+Safari, macOS           359      553      344      543         1582
+Safari, iPhone          382      644      388      514         1698
+Firefox, Windows        289      446      300      275         1135
+Edge, Windows           374      532      384      241         1325
+Googlebot               196      299      202      314          926
+none                    120        1      124      170          312
+
+# 48ee53f (view once)
+#  07:52:44 up 3 days, 11:42,  3 users,  load average: 7.73, 10.46, 9.90
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           532      631      357      167          973
+Chrome, Windows         308      484      370      138          981
+Chrome, Android         357      524      364      147         1053
+Safari, macOS           331      567      349      208         1250
+Safari, iPhone          377      595      394      171         1270
+Firefox, Windows        274      425      296      119          913
+Edge, Windows           378      512      397      143         1116
+Googlebot               192      290      207      160          739
+none                    123        1      124       77          228
+#  07:53:01 up 3 days, 11:42,  3 users,  load average: 6.98, 10.11, 9.79
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           291      420      322      159          960
+Chrome, Windows         300      427      322      140          935
+Chrome, Android         338      481      358      144         1040
+Safari, macOS           327      555      346      204         1220
+Safari, iPhone          367      586      387      166         1260
+Firefox, Windows        274      442      309      117          898
+Edge, Windows           372      524      400      138         1127
+Googlebot               196      301      221      165          730
+none                    115        1      124       76          232
+#  07:53:18 up 3 days, 11:42,  3 users,  load average: 6.03, 9.74, 9.68
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           289      423      323      159          950
+Chrome, Windows         296      430      321      132          929
+Chrome, Android         339      481      364      144         1042
+Safari, macOS           327      548      342      203         1215
+Safari, iPhone          364      585      385      166         1264
+Firefox, Windows        593      460      312      122          933
+Edge, Windows           386      535      426      149         1162
+Googlebot               197      300      227      162          718
+none                    114        1      115       76          223
+
+# 4d0f527 (parse once)
+#  08:00:57 up 3 days, 11:50,  3 users,  load average: 5.51, 7.13, 8.55
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           286      419      305      164          604
+Chrome, Windows         302      425      309      129          573
+Chrome, Android         324      476      343      135          629
+Safari, macOS           309      575      344      208          840
+Safari, iPhone          356      628      373      158          840
+Firefox, Windows        252      426      267      115          551
+Edge, Windows           347      505      383      129          663
+Googlebot               178      275      196      158          492
+none                    111        2      109       76          191
+#  08:01:11 up 3 days, 11:50,  3 users,  load average: 5.03, 6.94, 8.46
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           277      419      293      155          620
+Chrome, Windows         286      433      307      131          599
+Chrome, Android         336      492      372      136          669
+Safari, macOS           315      583      334      205          824
+Safari, iPhone          350      623      367      162          841
+Firefox, Windows        258      431      268      116          563
+Edge, Windows           350      510      373      131          704
+Googlebot               190      287      198      159          496
+none                    112        1      111       77          193
+#  08:01:25 up 3 days, 11:50,  3 users,  load average: 6.78, 7.27, 8.55
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           284      415      308      154          597
+Chrome, Windows         303      424      309      132          625
+Chrome, Android         338      487      336      138          674
+Safari, macOS           319      578      340      208          842
+Safari, iPhone          356      628      369      157          849
+Firefox, Windows        266      432      268      116          551
+Edge, Windows           349      507      365      132          679
+Googlebot               195      293      203      159          496
+none                    112        1      112       76          191
+
+# ed75dc0 (lazy segments)
+#  08:04:43 up 3 days, 11:54,  3 users,  load average: 4.62, 5.85, 7.73
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           206      369      214      163          577
+Chrome, Windows         228      389      225      135          574
+Chrome, Android         274      466      280      157          654
+Safari, macOS           252      540      264      224          833
+Safari, iPhone          322      561      293      162          795
+Firefox, Windows        228      411      231      121          606
+Edge, Windows           258      456      272      132          600
+Googlebot               170      264      177      158          490
+none                     99        1       99       79          192
+#  08:04:56 up 3 days, 11:54,  3 users,  load average: 6.18, 6.13, 7.80
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           205      370      210      155          589
+Chrome, Windows         222      376      223      128          558
+Chrome, Android         278      460      279      141          654
+Safari, macOS           249      534      261      230          823
+Safari, iPhone          310      584      317      183          820
+Firefox, Windows        232      418      239      126          578
+Edge, Windows           281      469      292      141          629
+Googlebot               183      282      200      177          516
+none                    100        2      102       80          201
+#  08:05:09 up 3 days, 11:54,  3 users,  load average: 6.31, 6.16, 7.79
+agent                 parse  blocked platform  to_view page request
+Chrome, macOS           217      377      216      158          568
+Chrome, Windows         215      380      227      138          552
+Chrome, Android         266      448      266      140          619
+Safari, macOS           241      518      251      209          790
+Safari, iPhone          295      566      302      170          795
+Firefox, Windows        224      398      229      121          574
+Edge, Windows           258      442      283      138          623
+Googlebot               179      280      197      170          518
+none                     97        2       99       81          193
+

@@ -1,0 +1,147 @@
+{
+ "config": "native-main",
+ "rep": 3,
+ "cold_start_s": 0.091,
+ "pids": {
+  "campfire": 3636996
+ },
+ "load_start": [
+  "13.58",
+  "9.15",
+  "9.11"
+ ],
+ "idle": {
+  "VmHWM": 43.2265625,
+  "VmRSS": 43.2265625,
+  "RssAnon": 14.11328125,
+  "Threads": 9.0
+ },
+ "http": [
+  {
+   "avg_bytes": 24252,
+   "conc": 1,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 7.775,
+    "mean_ms": 0.23,
+    "n": 21997,
+    "p50_ms": 0.216,
+    "p90_ms": 0.262,
+    "p99_ms": 0.348
+   },
+   "ok": 21997,
+   "path": "/rooms/486777696",
+   "rps": 4399.2,
+   "secs": 5.0,
+   "statuses": {
+    "200": 21997
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.2191,
+    "loadgen": 0.0109
+   },
+   "cpu_cores": {
+    "campfire": 0.96,
+    "loadgen": 0.05
+   },
+   "route": "room_show"
+  },
+  {
+   "avg_bytes": 24252,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 4.519,
+    "mean_ms": 0.89,
+    "n": 90080,
+    "p50_ms": 0.861,
+    "p90_ms": 1.211,
+    "p99_ms": 1.665
+   },
+   "ok": 90080,
+   "path": "/rooms/486777696",
+   "rps": 18012.8,
+   "secs": 5.0,
+   "statuses": {
+    "200": 90080
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.2108,
+    "loadgen": 0.0119
+   },
+   "cpu_cores": {
+    "campfire": 3.8,
+    "loadgen": 0.21
+   },
+   "route": "room_show"
+  },
+  {
+   "avg_bytes": 1992,
+   "conc": 1,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 26.527,
+    "mean_ms": 0.53,
+    "n": 9460,
+    "p50_ms": 0.475,
+    "p90_ms": 0.567,
+    "p99_ms": 1.829
+   },
+   "ok": 9460,
+   "path": "POST /rooms/201306877/messages",
+   "rps": 1891.8,
+   "secs": 5.0,
+   "statuses": {
+    "200": 9460
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.5645,
+    "loadgen": 0.0194
+   },
+   "cpu_cores": {
+    "campfire": 1.07,
+    "loadgen": 0.04
+   },
+   "route": "post_message"
+  },
+  {
+   "avg_bytes": 1992,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 53.663,
+    "mean_ms": 3.27,
+    "n": 24422,
+    "p50_ms": 2.839,
+    "p90_ms": 4.619,
+    "p99_ms": 9.519
+   },
+   "ok": 24422,
+   "path": "POST /rooms/201306877/messages",
+   "rps": 4882.3,
+   "secs": 5.0,
+   "statuses": {
+    "200": 24422
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.543,
+    "loadgen": 0.0161
+   },
+   "cpu_cores": {
+    "campfire": 2.65,
+    "loadgen": 0.08
+   },
+   "route": "post_message"
+  }
+ ],
+ "cable": [],
+ "load_end": [
+  "11.75",
+  "9.06",
+  "9.08"
+ ]
+}
