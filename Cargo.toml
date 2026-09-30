@@ -90,6 +90,7 @@ hkdf         = "0.12"
 # zlib-rs rather than the default miniz_oxide: 2.3x faster at the same level 6 (plans/perf-attribution.md §2).
 # `runtime_detection` gives zlib-rs the `std` its CPU feature detection needs (AVX2 and PCLMULQDQ on
 # x86_64, CRC32 on aarch64); without it only its portable code (and NEON) runs. Same output bytes.
+# No test can tell the difference, so check `cargo tree -e features -i zlib-rs` still lists `std`.
 flate2       = { version = "1", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 # kit's front server (crates/kit/src/front): what Thruster did in front of the app
 instant-acme = { version = "0.8", default-features = false, features = ["ring", "hyper-rustls", "rcgen"] }

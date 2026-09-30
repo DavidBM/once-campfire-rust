@@ -281,7 +281,8 @@ mod tests {
     async fn gzip_round_trip_of_a_page_larger_than_the_window() {
         use std::io::Read;
         // Long repeats and several windows' worth of input, in chunks: the match comparison, the
-        // window slide and the CRC all run, in the SIMD versions zlib-rs picks at runtime.
+        // window slide and the CRC all run, in their SIMD versions where zlib-rs has them for this
+        // CPU (the scalar ones compute the same bytes).
         let page: Vec<u8> = (0..3000)
             .flat_map(|n| format!("<div id=\"message_{n}\" class=\"message\">{}</div>\n", "hello there ".repeat(n % 13)).into_bytes())
             .collect();
