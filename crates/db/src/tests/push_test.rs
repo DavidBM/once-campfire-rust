@@ -3,23 +3,36 @@
 
 use super::*;
 use crate::models::push_subscription::{MAX_PAYLOAD_BODY_BYTES, PushSubscription};
-use crate::rich_text::mention_attachment_for;
-use crate::{Membership, Message, NewMessage};
+use crate::{Membership, Message, NewMessage, RichText};
 
 const WEB_PUSH_PUBLIC_TEST_IP: &str = "142.250.185.206";
 
+/// A body's rich text, mentioning these users.
+struct Mentions(Vec<i64>);
+
+impl RichText for Mentions {
+    fn to_plain_text(&self, conn: &Connection, html: &str) -> String {
+        BasicRichText.to_plain_text(conn, html)
+    }
+
+    fn mentioned_user_ids(&self, _conn: &Connection, _html: &str) -> Vec<i64> {
+        self.0.clone()
+    }
+}
+
 /// How many deliveries `Room::MessagePusher#push` would queue for a new message.
-fn deliveries(t: &TestDb, room: &str, body: String) -> usize {
+fn deliveries(t: &TestDb, room: &str, body: &str, mentioned: &[i64]) -> usize {
     let attributes = NewMessage {
         room_id: id(room),
         creator_id: id("david"),
         client_message_id: Some("earth".into()),
-        body: Some(body),
+        body: Some(body.into()),
         attachment_blob_id: None,
     };
     let message = t.write(move |tx| Message::create(tx, attributes));
     let now = t.now();
-    let (_, everything, mentions) = t.read(|c| PushSubscription::pushes_for(c, &BasicRichText, &message, now));
+    let rich_text = Mentions(mentioned.to_vec());
+    let (_, everything, mentions) = t.read(|c| PushSubscription::pushes_for(c, &rich_text, &message, now));
     everything.len() + mentions.len()
 }
 
@@ -28,28 +41,28 @@ fn deliver_new_message_to_other_room_users_with_push_subscriptions() {
     let t = TestDb::new();
     let all = t.read(PushSubscription::count);
     let davids = t.read(|c| PushSubscription::for_user(c, id("david"))).len() as i64;
-    assert_eq!(deliveries(&t, "hq", "This is from earth".into()) as i64, all - davids);
+    assert_eq!(deliveries(&t, "hq", "This is from earth", &[]) as i64, all - davids);
 }
 
 #[test]
 fn notifies_subscribed_users() {
     let t = TestDb::new();
-    assert_eq!(deliveries(&t, "designers", "This is from earth".into()), 2);
-    assert_eq!(deliveries(&t, "designers", format!("Hey {}", mention_attachment_for(id("kevin")))), 3);
+    assert_eq!(deliveries(&t, "designers", "This is from earth", &[]), 2);
+    assert_eq!(deliveries(&t, "designers", "Hey @Kevin", &[id("kevin")]), 3);
 }
 
 #[test]
 fn does_not_notify_for_connected_rooms() {
     let t = TestDb::new();
     t.write(|tx| Membership::find(tx.conn(), id("kevin_designers"))?.connected(tx));
-    assert_eq!(deliveries(&t, "designers", format!("Hey {}", mention_attachment_for(id("kevin")))), 2);
+    assert_eq!(deliveries(&t, "designers", "Hey @Kevin", &[id("kevin")]), 2);
 }
 
 #[test]
 fn does_not_notify_for_invisible_rooms() {
     let t = TestDb::new();
     t.write(|tx| Membership::find(tx.conn(), id("kevin_designers"))?.update_involvement(tx, crate::Involvement::Invisible));
-    assert_eq!(deliveries(&t, "designers", format!("Hey {}", mention_attachment_for(id("kevin")))), 2);
+    assert_eq!(deliveries(&t, "designers", "Hey @Kevin", &[id("kevin")]), 2);
 }
 
 #[test]

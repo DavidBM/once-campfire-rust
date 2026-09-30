@@ -381,7 +381,7 @@ impl Message {
     /// `plain_text_body`: `body.to_plain_text.presence || attachment&.filename&.to_s || ""`
     pub fn plain_text_body(&self, conn: &Connection, rich_text: &dyn RichText) -> Result<String> {
         if let Some(html) = self.body_html(conn)? {
-            let text = rich_text.to_plain_text(conn, &html, &|id| User::find_by_id(conn, id).ok().flatten().map(|u| u.name));
+            let text = rich_text.to_plain_text(conn, &html);
             if !text.trim().is_empty() {
                 return Ok(text);
             }

@@ -4,7 +4,6 @@
 use super::*;
 use crate::models::active_storage::Blob;
 use crate::models::message::PAGE_SIZE;
-use crate::rich_text::mention_attachment_for;
 use crate::{Message, NewMessage, Timestamp};
 
 fn create(t: &TestDb, room: &str, creator: &str, body: &str, client_message_id: &str) -> Message {
@@ -31,23 +30,19 @@ fn creating_a_message_enqueues_to_push_later() {
     assert_eq!(pushes, vec![Event::PushMessage { room_id: id("designers"), message_id: message.id }]);
 }
 
+/// Which mentioned users are mentionees; reading the mentions is `campfire_richtext`'s.
 #[test]
 fn mentionees() {
     let t = TestDb::new();
-    let rich_text = BasicRichText;
     let pets = id("pets");
-    let mentioned = |html: String| {
-        t.read(|c| crate::models::message::mentionees_in_room(c, pets, &crate::RichText::mentioned_user_ids(&rich_text, c, &html)))
+    let mentionees = |user_ids: &[i64]| {
+        t.read(|c| crate::models::message::mentionees_in_room(c, pets, user_ids)).into_iter().map(|u| u.id).collect::<Vec<_>>()
     };
 
-    let users = mentioned(format!("<div>Hey {}</div>", mention_attachment_for(id("david"))));
-    assert_eq!(users.iter().map(|u| u.id).collect::<Vec<_>>(), vec![id("david")]);
-
-    let users = mentioned(format!("<div>Hey {} {}</div>", mention_attachment_for(id("david")), mention_attachment_for(id("david"))));
-    assert_eq!(users.iter().map(|u| u.id).collect::<Vec<_>>(), vec![id("david")]);
-
+    assert_eq!(mentionees(&[id("david")]), vec![id("david")]);
+    assert_eq!(mentionees(&[id("david"), id("david")]), vec![id("david")]);
     // Kevin isn't in All Pets.
-    assert!(mentioned(format!("<div>Hey {}</div>", mention_attachment_for(id("kevin")))).is_empty());
+    assert!(mentionees(&[id("kevin")]).is_empty());
 }
 
 #[test]
