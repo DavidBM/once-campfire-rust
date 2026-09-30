@@ -145,6 +145,94 @@ async fn public_files_are_served_before_routing() {
     assert_eq!(robots.status, StatusCode::OK);
 }
 
+/// Every file `ActionDispatch::Static` serves: `public/` and the digested assets.
+fn static_corpus() -> Vec<String> {
+    let public = ["/robots.txt", "/404.html", "/422.html", "/500.html", "/502.html", "/assets/.manifest.json"];
+    let assets = campfire_assets::manifest().iter().map(|(_, digested)| format!("{}/{digested}", campfire_assets::PREFIX));
+    public.into_iter().map(str::to_string).chain(assets).collect()
+}
+
+fn static_request(method: &str, path: &str, range: Option<&str>, if_modified_since: Option<&str>) -> Request<Body> {
+    let mut request = Request::builder().method(method).uri(path).header(header::HOST, "campfire.test");
+    for (name, value) in [(header::RANGE, range), (header::IF_MODIFIED_SINCE, if_modified_since)] {
+        if let Some(value) = value {
+            request = request.header(name, value);
+        }
+    }
+    request.body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+async fn static_responses_send_the_embedded_bytes_without_copying_them() {
+    let built_at = campfire_assets::serve(&campfire_assets::StaticRequest { method: "GET", path: "/robots.txt", ..Default::default() })
+        .unwrap()
+        .header("last-modified")
+        .unwrap()
+        .to_string();
+    let variants = [
+        ("GET", None, None),
+        ("HEAD", None, None),
+        ("GET", Some("bytes=1-10"), None),
+        ("GET", Some("bytes=0-1, 4-5"), None),
+        ("GET", Some("bytes=999999999-"), None),
+        ("GET", None, Some(built_at.as_str())),
+    ];
+    for path in static_corpus() {
+        for (method, range, if_modified_since) in variants {
+            let request = static_request(method, &path, range, if_modified_since);
+            let served = campfire_assets::serve(&campfire_assets::StaticRequest {
+                method,
+                path: &path,
+                range,
+                if_modified_since,
+                ..Default::default()
+            })
+            .unwrap();
+            let response = static_response(&request).unwrap();
+            let case = format!("{method} {path} {range:?} {if_modified_since:?}");
+
+            assert_eq!(response.status().as_u16(), served.status, "{case}");
+            let headers: Vec<(String, &str)> = response.headers().iter().map(|(n, v)| (n.to_string(), v.to_str().unwrap())).collect();
+            let expected: Vec<(String, &str)> = served.headers.iter().map(|(n, v)| (n.to_ascii_lowercase(), v.as_str())).collect();
+            assert_eq!(headers, expected, "{case}");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(body[..], served.body[..], "{case}");
+            if matches!(served.body, campfire_assets::Body::Borrowed(_)) && !body.is_empty() {
+                assert_eq!(body.as_ptr(), served.body.as_ptr(), "{case}: sent from the embedded bytes");
+            }
+        }
+    }
+}
+
+/// Times `static_response` (ActionDispatch::Static plus building and dropping the response) for
+/// an identity GET of a small public file, the first stylesheet, the largest script and the
+/// largest file; per call, median and range of 7 runs. In release:
+/// `cargo test --release -p campfire --bin campfire static_response_timing -- --ignored --nocapture`
+#[test]
+#[ignore = "timing harness (bench/results/static-body-20260930)"]
+fn static_response_timing() {
+    const ITERATIONS: u32 = 20_000;
+    let size = |path: &str| {
+        campfire_assets::serve(&campfire_assets::StaticRequest { method: "GET", path, ..Default::default() }).map_or(0, |r| r.body.len())
+    };
+    let largest = |suffix: &str| static_corpus().into_iter().filter(|path| path.ends_with(suffix)).max_by_key(|path| size(path)).unwrap();
+    let stylesheet = campfire_assets::stylesheet_path(campfire_assets::all_stylesheet_paths()[0]);
+    for path in ["/robots.txt".to_string(), stylesheet, largest(".js"), largest("")] {
+        let request = static_request("GET", &path, None, None);
+        let mut runs: Vec<std::time::Duration> = (0..7)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                for _ in 0..ITERATIONS {
+                    drop(std::hint::black_box(static_response(std::hint::black_box(&request))));
+                }
+                started.elapsed() / ITERATIONS
+            })
+            .collect();
+        runs.sort();
+        println!("{path} ({} bytes): median {:?}, range {:?}..{:?}", size(&path), runs[3], runs[0], runs[6]);
+    }
+}
+
 #[tokio::test]
 async fn unknown_and_unported_routes() {
     let Some(test) = boot_seeded().await else { return };

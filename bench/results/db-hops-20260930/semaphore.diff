@@ -1,0 +1,55 @@
+--- a/crates/db/src/database.rs
++++ b/crates/db/src/database.rs
+@@ -29,7 +29,7 @@
+ 
+ use rails_compat::clock::SharedClock;
+ use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
+-use tokio::sync::{mpsc, oneshot};
++use tokio::sync::{Semaphore, mpsc, oneshot};
+ 
+ use crate::error::{Error, Result};
+ use crate::events::{Event, EventSink};
+@@ -179,6 +179,9 @@
+ pub struct Database {
+     writer: mpsc::Sender<Job>,
+     readers: Arc<ReaderPool>,
++    /// One permit per reader connection: a read takes one before it takes a blocking thread, so
++    /// that no blocking thread waits for a connection.
++    reader_permits: Arc<Semaphore>,
+     env: Env,
+     path: PathBuf,
+ }
+@@ -217,7 +220,9 @@
+ 
+         let readers = (0..config.readers.max(1)).map(|_| open_connection(&config.path, true)).collect::<Result<Vec<_>>>()?;
+ 
+-        Ok(Self { writer: sender, readers: Arc::new(ReaderPool::new(readers)), env, path: config.path })
++        let reader_permits = Arc::new(Semaphore::new(readers.len()));
++
++        Ok(Self { writer: sender, readers: Arc::new(ReaderPool::new(readers)), reader_permits, env, path: config.path })
+     }
+ 
+     pub fn env(&self) -> &Env {
+@@ -259,14 +264,20 @@
+         response.blocking_recv().map_err(|_| Error::WriterGone)?
+     }
+ 
+-    /// Runs `f` on a reader connection, on the blocking pool.
++    /// Runs `f` on a reader connection, on the blocking pool, once a connection is free.
+     pub async fn read<T, F>(&self, f: F) -> Result<T>
+     where
+         T: Send + 'static,
+         F: FnOnce(&Connection) -> Result<T> + Send + 'static,
+     {
++        let permit = self.reader_permits.clone().acquire_owned().await.map_err(Error::other)?;
+         let readers = self.readers.clone();
+-        tokio::task::spawn_blocking(move || readers.with(f)).await.map_err(Error::other)?
++        tokio::task::spawn_blocking(move || {
++            let _permit = permit;
++            readers.with(f)
++        })
++        .await
++        .map_err(Error::other)?
+     }
+ 
+     /// [`Database::read`] for synchronous callers.

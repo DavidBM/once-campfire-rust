@@ -12,8 +12,8 @@ mod rich_text;
 #[cfg(test)]
 mod test_support;
 
-/// jemalloc: the room page alone makes thousands of allocations per request, across as many
-/// threads as the blocking pool grows to.
+/// jemalloc: the room page alone makes thousands of allocations per request, across the runtime
+/// workers, the database's writer and reader threads, and the blocking pool.
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

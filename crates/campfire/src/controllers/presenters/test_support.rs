@@ -189,6 +189,11 @@ pub fn encode(value: &str) -> String {
 }
 
 impl Browser<'_> {
+    /// Sets a cookie as a response would have (the value as it goes in the header).
+    pub fn set_cookie(&mut self, name: &str, value: &str) {
+        self.cookies.insert(name.to_string(), value.to_string());
+    }
+
     fn absorb_cookie_header(&mut self, header: &str) {
         for pair in header.split(';') {
             if let Some((name, value)) = pair.trim().split_once('=') {

@@ -276,4 +276,22 @@ mod tests {
             assert_eq!(out, input);
         }
     }
+
+    #[tokio::test]
+    async fn gzip_round_trip_of_a_page_larger_than_the_window() {
+        use std::io::Read;
+        // Long repeats and several windows' worth of input, in chunks: the match comparison, the
+        // window slide and the CRC all run, in their SIMD versions where zlib-rs has them for this
+        // CPU (the scalar ones compute the same bytes).
+        let page: Vec<u8> = (0..3000)
+            .flat_map(|n| format!("<div id=\"message_{n}\" class=\"message\">{}</div>\n", "hello there ".repeat(n % 13)).into_bytes())
+            .collect();
+        assert!(page.len() > 4 * 32 * 1024);
+        let chunks: Vec<std::io::Result<Bytes>> = page.chunks(40_000).map(|chunk| Ok(Bytes::copy_from_slice(chunk))).collect();
+        let body = gzip_stream(Body::from_stream(futures_util::stream::iter(chunks)), 0);
+        let bytes = body.collect().await.unwrap().to_bytes();
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(&bytes[..]).read_to_end(&mut out).unwrap();
+        assert_eq!(out, page);
+    }
 }

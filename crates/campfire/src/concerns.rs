@@ -465,18 +465,24 @@ pub fn remember_last_room_visited(c: &mut Ctx, room_id: i64) {
 /// `Current.user.rooms.original`.
 pub async fn last_room_visited(c: &Ctx) -> Result<Option<Room>> {
     let Some(user_id) = current_user(c).map(|user| user.id) else { return Ok(None) };
-    // `find_by(id: cookies[:last_room])` casts the cookie like an integer column would.
-    let last_room = c.cookies.get("last_room").and_then(integer_cast);
-    c.app()
-        .read(move |conn| {
-            if let Some(room_id) = last_room
-                && let Some(room) = Room::find_for_user(conn, user_id, room_id)?
-            {
-                return Ok(Some(room));
-            }
-            Room::original_for_user(conn, user_id)
-        })
-        .await
+    let last_room = last_room_cookie(c);
+    c.app().read(move |conn| last_room_visited_in(conn, user_id, last_room)).await
+}
+
+/// The `last_room` cookie, as `find_by(id: cookies[:last_room])` casts it (like an integer column).
+pub fn last_room_cookie(c: &Ctx) -> Option<i64> {
+    c.cookies.get("last_room").and_then(integer_cast)
+}
+
+/// [`last_room_visited`] inside a read that's already on a reader, for the user and the
+/// [`last_room_cookie`].
+pub fn last_room_visited_in(conn: &campfire_db::Connection, user_id: i64, last_room: Option<i64>) -> campfire_db::Result<Option<Room>> {
+    if let Some(room_id) = last_room
+        && let Some(room) = Room::find_for_user(conn, user_id, room_id)?
+    {
+        return Ok(Some(room));
+    }
+    Room::original_for_user(conn, user_id)
 }
 
 // --- RoomScoped ----------------------------------------------------------------------------------

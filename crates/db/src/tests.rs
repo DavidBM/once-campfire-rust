@@ -2,6 +2,7 @@
 
 mod account_test;
 mod callbacks_test;
+mod columns_test;
 mod differential_test;
 mod first_run_test;
 mod fixtures_test;

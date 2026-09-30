@@ -1,0 +1,76 @@
+# static_response per call: identity GET, building and dropping the response; median and range of
+# 7 runs of 20,000 calls (static_response_timing in crates/campfire/src/app/tests.rs):
+#   cargo test --release -p campfire --bin campfire static_response_timing -- --ignored --nocapture
+# Native release test binary, three invocations per build. Other agents' builds kept the host's
+# 1-minute load average at 10-20 throughout.
+
+# before: d93d3dd (body copied with `served.body.into_owned()`, header values with `from_str`)
+load average: 17.62, 14.05, 10.41
+/robots.txt (99 bytes): median 479ns, range 476ns..512ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 502ns, range 502ns..509ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 14.245µs, range 14.134µs..14.734µs
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 33.977µs, range 31.212µs..34.851µs
+load average: 17.17, 14.08, 10.46
+/robots.txt (99 bytes): median 489ns, range 485ns..491ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 513ns, range 508ns..596ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 14.447µs, range 14.233µs..14.513µs
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 35.447µs, range 34.551µs..35.558µs
+load average: 16.52, 14.00, 10.45
+/robots.txt (99 bytes): median 501ns, range 486ns..544ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 509ns, range 507ns..512ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 14.322µs, range 14.211µs..14.391µs
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 33.756µs, range 33.631µs..34.306µs
+
+# body only: `Body::from(served.body)`
+load average: 10.14, 12.39, 10.32
+/robots.txt (99 bytes): median 479ns, range 477ns..484ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 492ns, range 492ns..495ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 498ns, range 497ns..499ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 544ns, range 537ns..581ns
+/robots.txt (99 bytes): median 477ns, range 471ns..504ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 491ns, range 489ns..500ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 490ns, range 488ns..517ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 530ns, range 529ns..544ns
+/robots.txt (99 bytes): median 476ns, range 472ns..530ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 496ns, range 489ns..517ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 490ns, range 489ns..495ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 531ns, range 530ns..536ns
+
+# interleaved: body only, then e78bce9 (body, and header values with `HeaderValue::try_from(String)`)
+body only:
+/robots.txt (99 bytes): median 495ns, range 486ns..535ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 497ns, range 495ns..544ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 500ns, range 497ns..502ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 547ns, range 542ns..574ns
+body + try_from:
+/robots.txt (99 bytes): median 488ns, range 474ns..499ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 488ns, range 482ns..526ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 487ns, range 475ns..514ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 522ns, range 517ns..703ns
+body only:
+/robots.txt (99 bytes): median 513ns, range 509ns..543ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 529ns, range 527ns..569ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 529ns, range 524ns..555ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 572ns, range 569ns..657ns
+body + try_from:
+/robots.txt (99 bytes): median 452ns, range 451ns..472ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 472ns, range 470ns..474ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 474ns, range 473ns..548ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 514ns, range 513ns..517ns
+body only:
+/robots.txt (99 bytes): median 510ns, range 494ns..517ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 509ns, range 500ns..525ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 513ns, range 509ns..549ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 546ns, range 544ns..548ns
+body + try_from:
+/robots.txt (99 bytes): median 489ns, range 468ns..647ns
+/assets/_reset-9c3efd7b.css (1218 bytes): median 510ns, range 509ns..515ns
+/assets/lexxy-a21f41d4.js (922910 bytes): median 522ns, range 511ns..600ns
+/assets/lexxy-cf040c43.js.map (2179664 bytes): median 562ns, range 554ns..616ns
+
+# Medians of the three invocations:
+#                                   before     body only   body + headers (e78bce9, interleaved)
+# /robots.txt (99 B)                489 ns     477 ns      488 ns
+# _reset.css (1,218 B)              509 ns     492 ns      488 ns
+# lexxy.js (922,910 B)              14.32 µs   490 ns      487 ns
+# lexxy.js.map (2,179,664 B)        33.98 µs   531 ns      522 ns

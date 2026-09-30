@@ -1,13 +1,14 @@
 //! `reference/app/models/room.rb`, `rooms/*.rb` and `room/message_pusher.rb`'s queries.
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 
 use crate::database::Tx;
 use crate::error::{Errors, OptionalExt, Result};
 use crate::events::Event;
+use crate::models::membership::membership_columns;
 use crate::models::{Membership, Message, User};
-use crate::sql::{self, CachedStatements, placeholders, query_all, query_one};
+use crate::sql::{self, CachedStatements, columns, placeholders, query_all, query_one};
 use crate::time::{SQLITE_NOW, Timestamp};
 
 /// The STI `type` column.
@@ -68,36 +69,39 @@ pub struct Room {
     pub updated_at: Timestamp,
 }
 
-const SELECT_FOR_USER: &str =
-    r#"SELECT "rooms".* FROM "rooms" INNER JOIN "memberships" ON "rooms"."id" = "memberships"."room_id" WHERE "memberships"."user_id" = ?"#;
+columns! {
+    Room, "rooms", room_columns {
+        id: "id",
+        name: "name",
+        room_type: "type",
+        creator_id: "creator_id",
+        created_at: "created_at",
+        updated_at: "updated_at",
+    }
+}
+
+const SELECT_FOR_USER: &str = concat!(
+    "SELECT ",
+    room_columns!(),
+    r#" FROM "rooms" INNER JOIN "memberships" ON "rooms"."id" = "memberships"."room_id" WHERE "memberships"."user_id" = ?"#
+);
 
 impl Room {
-    pub(crate) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            room_type: row.get("type")?,
-            creator_id: row.get("creator_id")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
-    }
-
     pub fn find(conn: &Connection, id: i64) -> Result<Self> {
         Self::find_by_id(conn, id)?.or_not_found("Room")
     }
 
     pub fn find_by_id(conn: &Connection, id: i64) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "rooms" WHERE "rooms"."id" = ? LIMIT 1"#, [id], Self::from_row)
+        query_one(conn, concat!("SELECT ", room_columns!(), r#" FROM "rooms" WHERE "rooms"."id" = ? LIMIT 1"#), [id], Self::from_row)
     }
 
     pub fn all(conn: &Connection) -> Result<Vec<Self>> {
-        query_all(conn, r#"SELECT * FROM "rooms""#, [], Self::from_row)
+        query_all(conn, concat!("SELECT ", room_columns!(), r#" FROM "rooms""#), [], Self::from_row)
     }
 
     /// `Room.opens` / `closeds` / `directs`
     pub fn of_type(conn: &Connection, room_type: RoomType) -> Result<Vec<Self>> {
-        query_all(conn, r#"SELECT * FROM "rooms" WHERE "rooms"."type" = ?"#, [room_type], Self::from_row)
+        query_all(conn, concat!("SELECT ", room_columns!(), r#" FROM "rooms" WHERE "rooms"."type" = ?"#), [room_type], Self::from_row)
     }
 
     pub fn count_of_type(conn: &Connection, room_type: RoomType) -> Result<i64> {
@@ -106,7 +110,12 @@ impl Room {
 
     /// `Room.original`: the oldest room.
     pub fn original(conn: &Connection) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "rooms" ORDER BY "rooms"."created_at" ASC LIMIT 1"#, [], Self::from_row)
+        query_one(
+            conn,
+            concat!("SELECT ", room_columns!(), r#" FROM "rooms" ORDER BY "rooms"."created_at" ASC LIMIT 1"#),
+            [],
+            Self::from_row,
+        )
     }
 
     // `Current.user.rooms` and its scopes
@@ -185,7 +194,11 @@ impl Room {
         let wanted: std::collections::BTreeSet<i64> = user_ids.iter().copied().collect();
         let candidates = query_all(
             conn,
-            r#"SELECT "rooms".* FROM "rooms" INNER JOIN "memberships" ON "memberships"."room_id" = "rooms"."id" INNER JOIN "users" ON "users"."id" = "memberships"."user_id" WHERE "rooms"."type" = ?"#,
+            concat!(
+                "SELECT ",
+                room_columns!(),
+                r#" FROM "rooms" INNER JOIN "memberships" ON "memberships"."room_id" = "rooms"."id" INNER JOIN "users" ON "users"."id" = "memberships"."user_id" WHERE "rooms"."type" = ?"#
+            ),
             [RoomType::Direct],
             Self::from_row,
         )?;
@@ -266,7 +279,8 @@ impl Room {
     /// (with reconnect) after commit.
     pub fn revoke_from(&self, tx: &mut Tx<'_>, user_ids: &[i64]) -> Result<()> {
         let sql = format!(
-            r#"SELECT "memberships".* FROM "memberships" WHERE "memberships"."room_id" = ? AND "memberships"."user_id" IN ({})"#,
+            r#"SELECT {} FROM "memberships" WHERE "memberships"."room_id" = ? AND "memberships"."user_id" IN ({})"#,
+            membership_columns!(),
             placeholders(user_ids.len())
         );
         let values: Vec<i64> = std::iter::once(self.id).chain(user_ids.iter().copied()).collect();

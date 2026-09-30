@@ -45,7 +45,7 @@ pub async fn index(c: &mut Ctx) -> Result {
     }
     c.respond_to(&[&format::HTML])?;
     let views = present(c, move |presenter| presenter.messages(&messages)).await?;
-    let response = page::bare(c, StatusCode::OK, &format::HTML, |ctx| views::Index { ctx, messages: &views }.render()).await?;
+    let response = page::bare(c, StatusCode::OK, &format::HTML, |ctx| views::Index { ctx, messages: &views }.render_presized()).await?;
     let fragments = campfire_views::messages::MessageItem::cached_fragments(&c.app().fragment_cache, &views);
     Ok(response.with_cached_fragments(fragments))
 }
@@ -239,10 +239,13 @@ pub(crate) async fn create_message(c: &Ctx, room: &Room, attributes: MessagePara
             Ok((message, blob))
         })
         .await?;
-    if let Some(blob) = blob {
-        process_attachment(c.app(), blob).await?;
-    }
+    // Without an attachment, `message` is the row as stored: nothing after the commit writes to it,
+    // and Rails answers with the same record (`create!(attributes).tap(&:process_attachment)`,
+    // reference/app/models/message/attachment.rb). Analyzing an attachment touches the message, so
+    // then it's read back.
+    let Some(blob) = blob else { return Ok(message) };
     let id = message.id;
+    process_attachment(c.app(), blob).await?;
     c.app().read(move |conn| Message::find(conn, id)).await
 }
 

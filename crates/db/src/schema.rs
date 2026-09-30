@@ -6,7 +6,9 @@
 //! `db:prepare` (loading `reference/db/schema.rb`), minus the objects SQLite derives on its
 //! own (FTS5 shadow tables, `sqlite_sequence`, autoindexes). A fresh `db:prepare` loads
 //! `schema.rb`, so columns come out in alphabetical order; databases that were migrated keep
-//! migration order. All queries in this crate name their columns, so both work.
+//! migration order. All queries in this crate name their columns, so both work: most read them
+//! by name, and the hot models (`sql::columns!`) select a list of them and read by position in
+//! that list, never by position over `*`.
 
 use rails_compat::clock::Clock;
 use rusqlite::{Connection, OptionalExtension, params};

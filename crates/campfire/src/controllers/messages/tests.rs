@@ -67,6 +67,89 @@ async fn create_appends_the_message_as_a_turbo_stream() {
     assert_eq!((message.client_message_id.as_str(), message.creator_id), ("abc-123", DAVID));
 }
 
+/// The message in a turbo stream: what's inside its `<template>`.
+fn template(stream: &str) -> &str {
+    let start = stream.find("<template>").expect("a template") + "<template>".len();
+    &stream[start..stream.rfind("</template>").unwrap()]
+}
+
+type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// The next cable frame that isn't a ping.
+async fn next_frame(socket: &mut Socket) -> serde_json::Value {
+    use futures_util::StreamExt;
+    loop {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), socket.next()).await.expect("a frame").unwrap().unwrap();
+        let frame: serde_json::Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+        if frame["type"] != "ping" {
+            return frame;
+        }
+    }
+}
+
+/// A text message answers and broadcasts the row `Message::create` returned, not one read back
+/// from the database: it has to render as the stored row does. The room page, which reads the
+/// message from the database, shows the same fragment (cached under the stored `updated_at`).
+#[tokio::test]
+async fn a_text_message_is_answered_and_broadcast_as_it_was_stored() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message as Frame;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let Some(app) = TestApp::boot().await else { return };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let service = campfire_kit::front::app_service(app.booted.router.clone());
+    let shutdown = campfire_kit::front::Shutdown::when(std::future::pending());
+    tokio::spawn(campfire_kit::front::serve_plain(listener, service, campfire_kit::front::Protocol::Http1, Default::default(), shutdown));
+
+    let room = app.db().read(|conn| campfire_db::Room::find(conn, ALL_TALK)).await.unwrap();
+    let streamables = [crate::channels::room_gid(&room).to_param(), "messages".into()];
+    let signed = rails_compat::turbo::signed_stream_name(&app.booted.app.secrets, &streamables.each_ref().map(String::as_str));
+    let identifier = serde_json::json!({ "channel": "RoomMessagesChannel", "signed_stream_name": signed }).to_string();
+    let mut request = format!("ws://{address}/cable").into_client_request().unwrap();
+    request.headers_mut().insert("origin", format!("http://{address}").parse().unwrap());
+    request.headers_mut().insert("sec-websocket-protocol", "actioncable-v1-json".parse().unwrap());
+    request.headers_mut().insert("cookie", david_cookie().parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    assert_eq!(next_frame(&mut socket).await["type"], "welcome");
+    let subscribe = serde_json::json!({ "command": "subscribe", "identifier": identifier }).to_string();
+    socket.send(Frame::text(subscribe)).await.unwrap();
+    assert_eq!(next_frame(&mut socket).await["type"], "confirm_subscription");
+
+    let mut david = app.david();
+    let reply = david
+        .write(
+            Req::new(Method::POST, &format!("/rooms/{ALL_TALK}/messages"))
+                .header("accept", TURBO_STREAM_ACCEPT)
+                .form(&[("message[body]", "<p>Straight from the <em>writer</em></p>"), ("message[client_message_id]", "as-stored")]),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    let broadcast = next_frame(&mut socket).await;
+    assert_eq!(broadcast["identifier"], identifier);
+    let broadcast = broadcast["message"].as_str().unwrap().to_string();
+
+    let stored = messages_in(&app, ALL_TALK).await.pop().unwrap();
+    assert_eq!((stored.client_message_id.as_str(), stored.creator_id), ("as-stored", DAVID));
+    let response = reply.text();
+    let message = template(&response);
+    assert_eq!(template(&broadcast), message);
+    assert!(broadcast.starts_with(r#"<turbo-stream action="append" target="messages_rooms_closed_486777696"><template>"#), "{broadcast}");
+    assert!(message.contains(r#"id="message_as-stored""#), "{message}");
+    assert!(message.contains(&format!(r#"data-message-id="{}""#, stored.id)));
+    let epoch_ms = campfire_views::messages::support::epoch_ms;
+    assert!(message.contains(&format!(r#"data-message-timestamp="{}""#, epoch_ms(stored.created_at.jiff()))));
+    assert!(message.contains(&format!(r#"data-message-updated-at="{}""#, epoch_ms(stored.updated_at.jiff()))));
+    // Cached under the stored row's key (its `updated_at` to the microsecond), which is what the
+    // room page, reading the message from the database, looks up.
+    let cached = campfire_views::fragment_cache::with(&app.booted.app.fragment_cache, || {
+        campfire_views::messages::cached_message_fragment(stored.id, stored.updated_at.jiff())
+    });
+    assert_eq!(cached.as_deref().map(String::as_str), Some(message));
+    assert!(david.get(&format!("/rooms/{ALL_TALK}")).await.text().contains(message), "the room page's copy of the message");
+}
+
 #[tokio::test]
 async fn create_in_a_room_you_left_renders_room_not_found() {
     let Some(app) = TestApp::boot().await else { return };

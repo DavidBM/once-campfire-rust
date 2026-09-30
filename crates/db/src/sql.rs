@@ -57,6 +57,60 @@ pub fn exists(conn: &Connection, sql: &str, params: impl Params) -> Result<bool>
     Ok(conn.prepare_cached(sql)?.exists(params)?)
 }
 
+/// A model read by position rather than by name, from one list of `field: "column"` pairs:
+///
+/// - `$list!()` is the list as SQL, `"table"."column", ...`, a literal for `concat!`;
+/// - `Model::COLUMNS` are the column names;
+/// - `Model::from_row_at(row, offset)` reads field i from column `offset + i`, and `from_row` from 0.
+///
+/// Reading by name costs a scan of the statement's column names for every field of every row,
+/// which was 3-5% of a room page (bench/results/columns-20260930). A query must select the list,
+/// never `*`: databases Rails migrated have their columns in another order than ones it loaded
+/// from `schema.rb` (see `schema.rs`).
+macro_rules! columns {
+    ($model:ident, $table:literal, $list:ident { $($field:ident: $column:literal),+ $(,)? }) => {
+        macro_rules! $list {
+            () => {
+                $crate::sql::columns!(@list $table, $($column),+)
+            };
+        }
+        // For other models' joins. The model's own module finds the macro without it.
+        #[allow(unused_imports)]
+        pub(crate) use $list;
+
+        impl $model {
+            pub(crate) const COLUMNS: &[&str] = &[$($column),+];
+
+            pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+                Self::from_row_at(row, 0)
+            }
+
+            pub(crate) fn from_row_at(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Self> {
+                // Each field's position in the list, as a discriminant.
+                #[allow(non_camel_case_types)]
+                enum Position {
+                    $($field),+
+                }
+                $crate::sql::debug_assert_columns(row, offset, Self::COLUMNS);
+                Ok(Self { $($field: row.get(offset + Position::$field as usize)?),+ })
+            }
+        }
+    };
+    (@list $table:literal, $first:literal $(, $column:literal)*) => {
+        concat!("\"", $table, "\".\"", $first, "\"" $(, ", \"", $table, "\".\"", $column, "\"")*)
+    };
+}
+pub(crate) use columns;
+
+/// In debug builds, and so in every test, checks that the row has `columns` from `offset` on:
+/// that the query selected the model's list, and a join reads each model at its own offset.
+pub(crate) fn debug_assert_columns(row: &Row<'_>, offset: usize, columns: &[&str]) {
+    let statement: &rusqlite::Statement<'_> = row.as_ref();
+    for (i, column) in columns.iter().enumerate() {
+        debug_assert_eq!(statement.column_name(offset + i).ok(), Some(*column), "column {} of {:?}", offset + i, statement.expanded_sql());
+    }
+}
+
 /// `SecureRandom.alphanumeric(n)`
 pub fn alphanumeric(n: usize) -> String {
     use rand::Rng;

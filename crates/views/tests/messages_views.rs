@@ -37,7 +37,31 @@ fn show_image_message() {
 fn index() {
     let g = golden("messages_index");
     let messages: Vec<messages::MessageItem> = g.input_at("messages");
-    g.assert_content(&g.render(|ctx| messages::Index { ctx, messages: &messages }.render().unwrap()));
+    g.assert_content(&g.render(|ctx| {
+        let page = messages::Index { ctx, messages: &messages };
+        let html = page.render_presized().unwrap();
+        assert_eq!(html, page.render().unwrap(), "the same page, however the buffer starts");
+        html
+    }));
+}
+
+#[test]
+fn index_of_cached_messages_renders_into_a_buffer_it_fits() {
+    let g = golden("messages_index");
+    let messages: Vec<messages::MessageItem> = (0..40)
+        .map(|n| messages::MessageItem::Fragment {
+            client_message_id: n.to_string(),
+            room_id: 1,
+            html: std::sync::Arc::new(format!("<div id=\"message_{n}\">{}</div>\n", "x".repeat(9_000 + n * 50))),
+        })
+        .collect();
+    g.render(|ctx| {
+        let page = messages::Index { ctx, messages: &messages };
+        let html = page.render_presized().unwrap();
+        assert_eq!(html, page.render().unwrap());
+        assert_eq!(html.capacity(), messages::Index::SIZE_HINT + messages::MessageItem::html_len(&messages) + 40, "never regrown");
+        html
+    });
 }
 
 #[test]

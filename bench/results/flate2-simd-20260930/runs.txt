@@ -1,0 +1,153 @@
+# flate2's zlib-rs backend without and with `runtime_detection` (zlib-rs `std`, so its AVX2,
+# PCLMULQDQ and aarch64 CRC32 paths can be picked at runtime).
+#   before: d93d3dd (features ["zlib-rs"])    after: 26d3fff (features ["zlib-rs", "runtime_detection"])
+# gzip_timing.rs (this directory), copied into crates/kit/examples/ and built at each commit:
+#   cargo build --release -p campfire_kit --example gzip_timing
+#   gzip_timing time FILE...     # per call: median and range of 7 runs of ~0.2 s
+#   gzip_timing digest FILE...   # SHA-256 of every output
+# gzip = Rack::Deflater's gzip_stream on the whole body (level 6, one chunk, sync flush, trailer);
+# piece = splice::compress of the body's last 4 KB with the 32 KB before it as the dictionary;
+# frame = the cable's permessage-deflate of a 1.5 KB message (fresh raw stream, level 6).
+# Pages: room_show (/rooms/<watercooler>), messages_page (?before=<busy_060>), search (?q=coffee)
+# and sidebar, rendered in-process from the default parity seed as David, identity. lexxy.js is
+# crates/assets/vendor/lexxy/app/assets/javascript/lexxy.js, the largest script.
+# Host: AMD Ryzen AI Max+ 395 (avx2 bmi2 pclmulqdq), native release builds, builds interleaved
+# per round; other agents' builds kept the 1-minute load average at 6-10.
+
+# Byte identity: 421 files, 19,624,471 bytes (the four pages, crates/views/tests/golden/a/*.html,
+# and every file under reference/app/{assets,javascript}, reference/vendor/javascript,
+# reference/public, crates/assets/{vendor,overrides}); gzip, piece and frame outputs of each.
+before: 421 files, all outputs: dec89d403ab0a2056beea6ac8496eec513af1650e3f03ea830ad3a07701b0de0
+after:  421 files, all outputs: dec89d403ab0a2056beea6ac8496eec513af1650e3f03ea830ad3a07701b0de0
+(the per-file digest lists are identical too)
+
+# Medians of the three rounds' medians:
+#                                   before      after       change
+# room_show (416,018 B) gzip        753.3 µs    634.3 µs    -15.8% (1.19x)
+# messages_page (383,844 B) gzip    443.7 µs    346.4 µs    -21.9% (1.28x)
+# search (149,522 B) gzip           253.8 µs    218.4 µs    -13.9% (1.16x)
+# sidebar (30,664 B) gzip           111.8 µs    110.2 µs    -1.4% (noise)
+# lexxy.js (922,893 B) gzip         9.220 ms    8.815 ms    -4.4%
+# piece (room, messages, search)    58.9, 25.1, 56.1 µs  60.3, 24.5, 55.9 µs   unchanged
+# frame (1.5 KB)                    9.7-12.1 µs           9.7-12.1 µs          unchanged
+
+# round 1, before (load average: 9.38, 9.68, 9.64)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 783.643µs, range 768.259µs..807.591µs
+  piece: median 60.314µs, range 59.697µs..62.91µs
+  frame: median 10.101µs, range 9.668µs..10.491µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 443.702µs, range 443.032µs..447.263µs
+  piece: median 25.121µs, range 24.921µs..25.603µs
+  frame: median 10.746µs, range 10.712µs..10.85µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 253.824µs, range 252.7µs..257.162µs
+  piece: median 56.138µs, range 56.069µs..56.2µs
+  frame: median 9.798µs, range 9.757µs..9.919µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 111.828µs, range 111.466µs..112.449µs
+  frame: median 9.699µs, range 9.534µs..9.799µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 9.078464ms, range 9.066691ms..9.127458ms
+  piece: median 58.046µs, range 57.933µs..59.744µs
+  frame: median 12.167µs, range 11.945µs..13.021µs
+# round 1, after (load average: 8.24, 9.42, 9.55)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 619.848µs, range 618.643µs..625.845µs
+  piece: median 59.529µs, range 59.48µs..59.601µs
+  frame: median 9.71µs, range 9.628µs..9.914µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 345.239µs, range 343.625µs..346.147µs
+  piece: median 24µs, range 23.922µs..24.565µs
+  frame: median 10.718µs, range 10.659µs..10.743µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 220.024µs, range 219.456µs..224.079µs
+  piece: median 56.155µs, range 56.029µs..56.64µs
+  frame: median 9.802µs, range 9.748µs..10.038µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 110.194µs, range 109.008µs..114.014µs
+  frame: median 9.72µs, range 9.645µs..9.922µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 8.877611ms, range 8.859428ms..8.967789ms
+  piece: median 58.063µs, range 57.889µs..60.389µs
+  frame: median 11.883µs, range 11.878µs..12.578µs
+# round 2, before (load average: 7.22, 9.14, 9.46)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 745.949µs, range 740.445µs..756.504µs
+  piece: median 58.892µs, range 58.672µs..59.742µs
+  frame: median 9.771µs, range 9.583µs..10.253µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 440.33µs, range 436.119µs..462.972µs
+  piece: median 25.311µs, range 24.636µs..26.135µs
+  frame: median 10.851µs, range 10.776µs..11.073µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 257.21µs, range 254.419µs..272.412µs
+  piece: median 56.935µs, range 56.012µs..63.488µs
+  frame: median 9.933µs, range 9.815µs..10.352µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 112.815µs, range 111.492µs..114.392µs
+  frame: median 10.043µs, range 9.909µs..10.206µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 9.370788ms, range 9.282395ms..9.719279ms
+  piece: median 58.653µs, range 58.219µs..61.004µs
+  frame: median 12.824µs, range 12.552µs..13.004µs
+# round 2, after (load average: 6.83, 8.95, 9.39)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 634.316µs, range 627.57µs..658.798µs
+  piece: median 60.914µs, range 59.787µs..62.959µs
+  frame: median 10.039µs, range 9.735µs..10.343µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 359.303µs, range 348.431µs..369.371µs
+  piece: median 24.759µs, range 24.094µs..28.336µs
+  frame: median 10.925µs, range 10.757µs..11.356µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 218.418µs, range 214.021µs..223.951µs
+  piece: median 55.929µs, range 55.456µs..56.967µs
+  frame: median 9.708µs, range 9.659µs..10.698µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 108.1µs, range 107.376µs..108.612µs
+  frame: median 9.687µs, range 9.53µs..10.14µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 8.776273ms, range 8.697006ms..8.917147ms
+  piece: median 58.5µs, range 58.114µs..59.543µs
+  frame: median 12.164µs, range 11.988µs..12.302µs
+# round 3, before (load average: 6.71, 8.82, 9.34)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 753.316µs, range 744.566µs..761.408µs
+  piece: median 58.934µs, range 58.713µs..59.524µs
+  frame: median 9.686µs, range 9.642µs..9.914µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 444.108µs, range 437.445µs..452.942µs
+  piece: median 24.77µs, range 24.697µs..25.002µs
+  frame: median 10.695µs, range 10.638µs..10.821µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 250.345µs, range 248.902µs..252.383µs
+  piece: median 55.496µs, range 55.374µs..56.093µs
+  frame: median 9.672µs, range 9.664µs..9.744µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 109.964µs, range 109.884µs..110.844µs
+  frame: median 9.67µs, range 9.583µs..9.901µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 9.220398ms, range 9.16139ms..9.417589ms
+  piece: median 58.099µs, range 57.846µs..58.959µs
+  frame: median 12.134µs, range 11.966µs..12.489µs
+# round 3, after (load average: 6.14, 8.63, 9.27)
+room_show.html (416018 B -> 21430 B, fb1aae52f87ed943)
+  gzip: median 638.427µs, range 632.32µs..652.122µs
+  piece: median 60.271µs, range 59.898µs..62.431µs
+  frame: median 9.683µs, range 9.653µs..9.947µs
+messages_page.html (383844 B -> 12480 B, c985fc5aaeb3f747)
+  gzip: median 346.367µs, range 341.794µs..354.844µs
+  piece: median 24.468µs, range 23.987µs..24.834µs
+  frame: median 10.635µs, range 10.606µs..10.711µs
+search.html (149522 B -> 9624 B, b9964ae4cb4a6072)
+  gzip: median 215.249µs, range 212.003µs..216.774µs
+  piece: median 55.251µs, range 55.149µs..55.896µs
+  frame: median 9.889µs, range 9.593µs..10.05µs
+sidebar.html (30664 B -> 5820 B, 8b4a96ca6557908e)
+  gzip: median 112.549µs, range 111.861µs..115.669µs
+  frame: median 10.006µs, range 9.94µs..10.239µs
+lexxy.js (922893 B -> 259977 B, aff64a266929e282)
+  gzip: median 8.814563ms, range 8.805556ms..9.153887ms
+  piece: median 58.541µs, range 58.38µs..58.958µs
+  frame: median 12.145µs, range 11.959µs..12.286µs
