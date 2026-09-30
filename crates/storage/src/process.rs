@@ -144,8 +144,17 @@ fn wait_until(child: &mut Child, deadline: Instant) -> std::io::Result<Option<Ex
             return Ok(None);
         }
         std::thread::sleep(pause.min(deadline - now));
-        pause = (pause * 2).min(Duration::from_millis(50));
+        pause = next_pause(pause);
     }
+}
+
+/// The longest `wait_until` sleeps between checks. `try_wait` is one `waitpid(WNOHANG)`, so polling
+/// often is cheap and keeps the return close to the exit: a child that exits between checks is
+/// noticed up to this much later.
+const MAX_PAUSE: Duration = Duration::from_millis(5);
+
+fn next_pause(pause: Duration) -> Duration {
+    (pause * 2).min(MAX_PAUSE)
 }
 
 #[cfg(test)]
@@ -195,6 +204,32 @@ mod tests {
         assert!(output.status.success());
         assert_eq!(output.stdout, b"out\n");
         assert_eq!(output.stderr, b"err\n");
+    }
+
+    #[test]
+    fn the_pause_between_checks_doubles_up_to_five_milliseconds() {
+        let pauses = std::iter::successors(Some(Duration::from_millis(1)), |&pause| Some(next_pause(pause)));
+        assert_eq!(pauses.take(6).map(|pause| pause.as_millis()).collect::<Vec<_>>(), [1, 2, 4, 5, 5, 5]);
+    }
+
+    #[test]
+    fn output_within_returns_soon_after_the_child_exits() {
+        // With pauses growing to 50 ms, a child that exited at 35 ms was noticed at 63 ms.
+        let run = |within: bool| {
+            let mut command = Command::new("sleep");
+            command.arg("0.035");
+            let started = Instant::now();
+            let output = if within { output_within(&mut command, Duration::from_secs(10)) } else { command.output() };
+            assert!(output.unwrap().status.success());
+            started.elapsed()
+        };
+        // The fastest of a few runs each, so a busy machine doesn't fail it.
+        let (mut plain, mut within) = (Duration::MAX, Duration::MAX);
+        for _ in 0..5 {
+            plain = plain.min(run(false));
+            within = within.min(run(true));
+        }
+        assert!(within < plain + Duration::from_millis(15), "output() {plain:?}, output_within {within:?}");
     }
 
     #[test]
