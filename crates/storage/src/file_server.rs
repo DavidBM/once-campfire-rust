@@ -116,10 +116,8 @@ pub fn byte_ranges(header: Option<&str>, size: u64) -> Option<Vec<(u64, u64)>> {
     if size == 0 {
         return None;
     }
-    let header = header?;
-    let spec = &header[header.find("bytes=")? + 6..];
-    let spec = &spec[..spec.find(';').unwrap_or(spec.len())];
-    if spec.is_empty() || spec.matches(',').count() >= 100 {
+    let spec = range_spec(header?)?;
+    if spec.matches(',').count() >= 100 {
         return None;
     }
     let size = size as i128;
@@ -159,6 +157,16 @@ pub fn byte_ranges(header: Option<&str>, size: u64) -> Option<Vec<(u64, u64)>> {
     Some(ranges.into_iter().map(|(a, b)| (a as u64, b as u64)).collect())
 }
 
+/// `http_range =~ /bytes=([^;]+)/`: after the first `bytes=` that something other than `;`
+/// follows, up to the next `;`.
+fn range_spec(header: &str) -> Option<&str> {
+    header.match_indices("bytes=").find_map(|(i, _)| {
+        let rest = &header[i + 6..];
+        let spec = &rest[..rest.find(';').unwrap_or(rest.len())];
+        (!spec.is_empty()).then_some(spec)
+    })
+}
+
 /// `/,[ \t]*/`
 fn split_comma(s: &str) -> Option<(usize, usize)> {
     let i = s.find(',')?;
@@ -182,7 +190,8 @@ fn ruby_split(s: &str, find: impl Fn(&str) -> Option<(usize, usize)>) -> Vec<&st
     fields
 }
 
-/// `String#to_i`: leading whitespace, an optional sign, then digits (underscores between them).
+/// `String#to_i`: leading whitespace, an optional sign and `0d`, then digits (underscores between
+/// them). Saturating: past i128 is past any file size.
 fn ruby_to_i(s: &str) -> i128 {
     let s = s.trim_start_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']);
     let (negative, digits) = match s.as_bytes().first() {
@@ -190,6 +199,7 @@ fn ruby_to_i(s: &str) -> i128 {
         Some(b'+') => (false, &s[1..]),
         _ => (false, s),
     };
+    let digits = digits.strip_prefix("0d").or_else(|| digits.strip_prefix("0D")).unwrap_or(digits);
     let mut value: i128 = 0;
     let mut previous_underscore = false;
     for (i, c) in digits.char_indices() {
@@ -222,20 +232,61 @@ fn httpdate(time: std::time::SystemTime) -> String {
 mod tests {
     use super::*;
 
+    /// Byte ranges, `None` for the whole file.
+    type Ranges = Option<&'static [(u64, u64)]>;
+
+    /// `Rack::Utils.get_byte_ranges(header, size)` in the reference (rack 3.2.6).
+    #[rustfmt::skip]
+    const RACK_RANGES: &[(&str, u64, Ranges)] = &[
+        ("bytes=0-4", 10, Some(&[(0, 4)])),
+        ("bytes=5-", 10, Some(&[(5, 9)])),
+        ("bytes=-3", 10, Some(&[(7, 9)])),
+        ("bytes=-30", 10, Some(&[(0, 9)])),
+        ("bytes=0-99999999999999999999", 10, Some(&[(0, 9)])),
+        ("bytes=99999999999999999999-", 10, Some(&[])),
+        ("bytes=-99999999999999999999", 10, Some(&[(0, 9)])),
+        ("bytes=0-1,", 10, Some(&[(0, 1)])),
+        ("bytes= -5", 10, Some(&[(0, 5)])),
+        ("bytes=0-1, 3-4", 10, Some(&[(0, 1), (3, 4)])),
+        ("bytes=0-1,\t 3-4", 10, Some(&[(0, 1), (3, 4)])),
+        ("bytes=3-5,1-2", 10, Some(&[(3, 5), (1, 2)])),
+        ("bytes=+1-2", 10, Some(&[(1, 2)])),
+        ("bytes=1-+2", 10, Some(&[(1, 2)])),
+        ("bytes=1_0-2_0", 100, Some(&[(10, 20)])),
+        ("bytes=0d5-0d9", 100, Some(&[(5, 9)])),
+        ("bytes=\u{a0}1-2", 10, Some(&[(0, 2)])),
+        ("bytes=a-b", 10, Some(&[(0, 0)])),
+        ("bytes=0-0x5", 10, Some(&[(0, 0)])),
+        ("bytes=0-1 ", 10, Some(&[(0, 1)])),
+        ("bytes=0 -1", 10, Some(&[(0, 1)])),
+        ("bytes=1-2-3", 10, Some(&[(1, 2)])),
+        ("bytes=9-9", 10, Some(&[(9, 9)])),
+        ("bytes=10-", 10, Some(&[])),
+        ("bytes=10-12", 10, Some(&[])),
+        ("bytes=-0", 10, Some(&[])),
+        ("bytes=--5", 10, Some(&[])),
+        ("bytes=0-4,5-9,0-0", 10, Some(&[])),
+        ("bytes=;bytes=2-3", 10, Some(&[(2, 3)])),
+        ("bytes=0-1;bytes=2-3", 10, Some(&[(0, 1)])),
+        ("xbytes=0-1", 10, Some(&[(0, 1)])),
+        ("bytes=;0-1", 10, None),
+        ("bytes=", 10, None),
+        ("bytes=-", 10, None),
+        ("bytes=5", 10, None),
+        ("bytes=1-0", 10, None),
+        ("bytes=0-1,,2-3", 10, None),
+        ("items=0-1", 10, None),
+        ("bytes=0-4", 0, None),
+    ];
+
     #[test]
     fn byte_ranges_match_rack() {
+        for &(header, size, expected) in RACK_RANGES {
+            assert_eq!(byte_ranges(Some(header), size), expected.map(<[_]>::to_vec), "{header:?} of {size}");
+        }
         assert_eq!(byte_ranges(None, 10), None);
-        assert_eq!(byte_ranges(Some("bytes=0-4"), 10), Some(vec![(0, 4)]));
-        assert_eq!(byte_ranges(Some("bytes=5-"), 10), Some(vec![(5, 9)]));
-        assert_eq!(byte_ranges(Some("bytes=-3"), 10), Some(vec![(7, 9)]));
-        assert_eq!(byte_ranges(Some("bytes=-30"), 10), Some(vec![(0, 9)]));
-        assert_eq!(byte_ranges(Some("bytes=0-1, 3-4"), 10), Some(vec![(0, 1), (3, 4)]));
-        assert_eq!(byte_ranges(Some("bytes=4-1"), 10), None);
-        assert_eq!(byte_ranges(Some("bytes=20-30"), 10), Some(vec![]));
-        assert_eq!(byte_ranges(Some("bytes=0-9,0-9"), 10), Some(vec![]));
-        assert_eq!(byte_ranges(Some("bytes=-"), 10), None);
-        assert_eq!(byte_ranges(Some("items=0-1"), 10), None);
-        assert_eq!(byte_ranges(Some("bytes=0-100"), 10), Some(vec![(0, 9)]));
-        assert_eq!(byte_ranges(Some("bytes=0-1"), 0), None);
+        // 99 commas are read, and 100 aren't (`max_ranges`).
+        assert_eq!(byte_ranges(Some(&format!("bytes=0-1,{}", "0-0,".repeat(98))), 10), Some(vec![]));
+        assert_eq!(byte_ranges(Some(&format!("bytes=0-1,{}", "0-0,".repeat(99))), 10), None);
     }
 }
