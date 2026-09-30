@@ -1,8 +1,16 @@
 //! One writer thread that owns the write connection and takes a bounded queue of work, plus
-//! a pool of reader connections. Each write runs in `BEGIN IMMEDIATE`
-//! (`default_transaction_mode: immediate` in `reference/config/database.yml`), then its
-//! after-commit work runs in order, outside the transaction, the way Active Record runs
-//! `after_commit` callbacks.
+//! reader threads that each own a reader connection and take reads from one queue. Each write
+//! runs in `BEGIN IMMEDIATE` (`default_transaction_mode: immediate` in
+//! `reference/config/database.yml`), then its after-commit work runs in order, outside the
+//! transaction, the way Active Record runs `after_commit` callbacks.
+//!
+//! Reads run on their own threads rather than tokio's blocking pool, where a read that found
+//! every connection busy parked a blocking thread until one came free (99–136 threads for 5
+//! readers under load, in the pool bcrypt, storage and uploads share). Here a waiting read costs
+//! a queue entry, reads leave the queue in the order they were queued (with several readers, two
+//! reads taken one after the other may still start in either order), and a reader that finishes
+//! a read takes the next one without a hand-off to another thread, which is what makes it cheaper
+//! than waiting for a connection on an async semaphore (bench/results/db-hops-20260930).
 //!
 //! WAL checkpoints run on a checkpointer thread with a connection of its own, not on the writer.
 //! Rails keeps SQLite's auto-checkpoint: once a commit leaves the WAL at 1,000 pages or more,
@@ -24,8 +32,9 @@
 //! stalling writes as Rails' commits do, but once per 10,000 pages instead of per 1,000.
 
 use std::cell::Cell;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, TryLockError};
 
 use rails_compat::clock::SharedClock;
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
@@ -173,12 +182,15 @@ impl Config {
 }
 
 type Job = Box<dyn FnOnce(&Connection, &Env) + Send>;
+type Read = Box<dyn FnOnce(&Connection) + Send>;
 
 /// The database handle. Cheap to clone.
 #[derive(Clone)]
 pub struct Database {
     writer: mpsc::Sender<Job>,
-    readers: Arc<ReaderPool>,
+    readers: Arc<Readers>,
+    /// [`Database::read_blocking`]'s connection, opened on first use.
+    blocking_reader: Arc<Mutex<Option<Connection>>>,
     env: Env,
     path: PathBuf,
 }
@@ -215,9 +227,9 @@ impl Database {
             })
             .map_err(Error::other)?;
 
-        let readers = (0..config.readers.max(1)).map(|_| open_connection(&config.path, true)).collect::<Result<Vec<_>>>()?;
+        let readers = Readers::start(&config.path, config.readers.max(1))?;
 
-        Ok(Self { writer: sender, readers: Arc::new(ReaderPool::new(readers)), env, path: config.path })
+        Ok(Self { writer: sender, readers: Arc::new(readers), blocking_reader: Arc::default(), env, path: config.path })
     }
 
     pub fn env(&self) -> &Env {
@@ -259,19 +271,35 @@ impl Database {
         response.blocking_recv().map_err(|_| Error::WriterGone)?
     }
 
-    /// Runs `f` on a reader connection, on the blocking pool.
+    /// Runs `f` on a reader thread, the next one free. Once queued, `f` runs even if its caller
+    /// stops waiting (a request dropped when its client goes away), as it did on the blocking
+    /// pool: some reads broadcast what a write committed, like messages#create's.
     pub async fn read<T, F>(&self, f: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&Connection) -> Result<T> + Send + 'static,
     {
-        let readers = self.readers.clone();
-        tokio::task::spawn_blocking(move || readers.with(f)).await.map_err(Error::other)?
+        let (reply, response) = oneshot::channel();
+        self.readers.queue.push(Box::new(move |conn| {
+            let _ = reply.send(f(conn));
+        }));
+        // A read that panics drops its reply as it unwinds.
+        response.await.map_err(|_| Error::other("the read panicked"))?
     }
 
-    /// [`Database::read`] for synchronous callers.
+    /// [`Database::read`] for synchronous callers (tests), on the calling thread, so that `f` may
+    /// borrow. It keeps a reader connection for these reads, and opens another for one that finds
+    /// it in use: a `read_blocking` inside another would otherwise wait for itself.
     pub fn read_blocking<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        self.readers.with(f)
+        let mut kept = match self.blocking_reader.try_lock() {
+            Ok(kept) => kept,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return f(&open_connection(&self.path, true)?),
+        };
+        if kept.is_none() {
+            *kept = Some(open_connection(&self.path, true)?);
+        }
+        f(kept.as_ref().expect("opened"))
     }
 }
 
@@ -369,50 +397,96 @@ fn open_connection(path: &Path, reader: bool) -> Result<Connection> {
     Ok(conn)
 }
 
-struct ReaderPool {
-    idle: Mutex<Vec<Connection>>,
-    available: Condvar,
+/// The reader threads, one per reader connection. They stop once the last [`Database`] handle,
+/// and so this, is gone.
+struct Readers {
+    queue: Arc<ReadQueue>,
 }
 
-impl ReaderPool {
-    fn new(connections: Vec<Connection>) -> Self {
-        Self { idle: Mutex::new(connections), available: Condvar::new() }
-    }
-
-    fn with<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let conn = {
-            let mut idle = self.idle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            loop {
-                if let Some(conn) = idle.pop() {
-                    break conn;
-                }
-                idle = self.available.wait(idle).unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
-        };
-        let checkout = Checkout { pool: self, conn: Some(conn) };
-        f(checkout.conn.as_ref().expect("checked out"))
-    }
-}
-
-/// A reader connection out of the pool, returned when dropped: also when the read panics, which
-/// would otherwise lose the connection for good (and after as many panics as there are readers,
-/// hang every read).
-struct Checkout<'a> {
-    pool: &'a ReaderPool,
-    conn: Option<Connection>,
-}
-
-impl Drop for Checkout<'_> {
-    fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            self.pool.idle.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(conn);
-            self.pool.available.notify_one();
+impl Readers {
+    fn start(path: &Path, count: usize) -> Result<Self> {
+        // Built first, so that a connection failing to open drops it, which stops the threads
+        // started before.
+        let readers = Self { queue: Arc::default() };
+        for _ in 0..count {
+            let conn = open_connection(path, true)?;
+            let queue = readers.queue.clone();
+            std::thread::Builder::new()
+                .name("campfire-db-reader".into())
+                .spawn(move || {
+                    while let Some(read) = queue.next() {
+                        // A panicking read fails its caller's read, not the reader.
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read(&conn)));
+                    }
+                })
+                .map_err(Error::other)?;
         }
+        Ok(readers)
+    }
+}
+
+impl Drop for Readers {
+    fn drop(&mut self) {
+        self.queue.lock().closed = true;
+        self.queue.ready.notify_all();
+    }
+}
+
+/// The reads waiting for a reader thread, in order.
+#[derive(Default)]
+struct ReadQueue {
+    state: Mutex<Queued>,
+    ready: Condvar,
+}
+
+#[derive(Default)]
+struct Queued {
+    reads: VecDeque<Read>,
+    /// Reader threads waiting for a read. Queueing one wakes a reader only when there is one to
+    /// wake: std's Condvar makes a futex syscall for every notify, waiter or not.
+    idle: usize,
+    closed: bool,
+}
+
+impl ReadQueue {
+    fn push(&self, read: Read) {
+        let mut state = self.lock();
+        state.reads.push_back(read);
+        let wake = state.idle > 0;
+        drop(state);
+        if wake {
+            self.ready.notify_one();
+        }
+    }
+
+    /// The next read, once there is one; `None` once the queue is closed and empty.
+    fn next(&self) -> Option<Read> {
+        let mut state = self.lock();
+        loop {
+            if let Some(read) = state.reads.pop_front() {
+                return Some(read);
+            }
+            if state.closed {
+                return None;
+            }
+            state.idle += 1;
+            state = self.ready.wait(state).unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.idle -= 1;
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Queued> {
+        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::task::JoinHandle;
+
     use super::*;
 
     fn main_file_len(path: &Path) -> u64 {
@@ -427,19 +501,215 @@ mod tests {
     }
 
     #[test]
-    fn a_panicking_read_returns_its_connection() {
+    fn a_panicking_blocking_read_leaves_its_connection_usable() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::new(dir.path().join("test.sqlite3"));
-        config.readers = 1;
-        let db = Database::open(config, Env::default()).unwrap();
+        let db = open_with_readers(&dir, 1);
         for _ in 0..3 {
             let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 db.read_blocking(|_| -> Result<()> { panic!("a bug in a read") })
             }));
             assert!(panicked.is_err());
         }
-        // With one reader, a lost connection would make this wait forever.
-        assert_eq!(db.read_blocking(|conn| Ok(conn.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?)).unwrap(), 1);
+        assert_eq!(db.read_blocking(select_one).unwrap(), 1);
+    }
+
+    /// A `read_blocking` inside another opens a connection rather than waiting for its caller's.
+    #[test]
+    fn blocking_reads_nest() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        let (done, nested) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(db.read_blocking(|outer| Ok(select_one(outer)? + db.read_blocking(select_one)?)));
+        });
+        let sum = nested.recv_timeout(Duration::from_secs(10)).expect("the inner read waited for the outer read's connection");
+        assert_eq!(sum.unwrap(), 2);
+    }
+
+    fn select_one(conn: &Connection) -> Result<i64> {
+        Ok(conn.query_row("SELECT 1", [], |r| r.get(0))?)
+    }
+
+    fn open_with_readers(dir: &tempfile::TempDir, readers: usize) -> Database {
+        let mut config = Config::new(dir.path().join("test.sqlite3"));
+        config.readers = readers;
+        Database::open(config, Env::default()).unwrap()
+    }
+
+    /// Awaits `future` for up to 10 seconds, so that reads which never run fail these tests
+    /// (saying `what` was awaited) rather than hang them.
+    async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
+        tokio::time::timeout(Duration::from_secs(10), future).await.unwrap_or_else(|_| panic!("timed out after 10 s waiting for: {what}"))
+    }
+
+    fn queued(db: &Database) -> usize {
+        db.readers.queue.lock().reads.len()
+    }
+
+    /// Waits until `count` reads are queued for a reader.
+    async fn until_queued(db: &Database, count: usize) {
+        within(&format!("{count} reads queued"), async {
+            while queued(db) < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    }
+
+    /// Awaits reads spawned as tasks, each of which must succeed.
+    async fn all_succeed(what: &str, reads: impl IntoIterator<Item = JoinHandle<Result<()>>>) {
+        within(what, async {
+            for read in reads {
+                read.await.unwrap().unwrap();
+            }
+        })
+        .await;
+    }
+
+    /// Occupies every reader thread until the returned senders are dropped.
+    async fn hold_every_reader(db: &Database, readers: usize) -> (Vec<std::sync::mpsc::Sender<()>>, Vec<JoinHandle<Result<()>>>) {
+        let (started, mut holding) = mpsc::unbounded_channel();
+        let (releases, holders) = (0..readers)
+            .map(|_| {
+                let (release, released) = std::sync::mpsc::channel::<()>();
+                let (db, started) = (db.clone(), started.clone());
+                let holder = tokio::spawn(async move {
+                    db.read(move |_| {
+                        started.send(()).unwrap();
+                        let _ = released.recv();
+                        Ok(())
+                    })
+                    .await
+                });
+                (release, holder)
+            })
+            .unzip();
+        within(&format!("{readers} readers each started a read"), async {
+            for _ in 0..readers {
+                holding.recv().await.unwrap();
+            }
+        })
+        .await;
+        (releases, holders)
+    }
+
+    /// Reads that wait for a reader take no thread: with the blocking pool capped at one thread,
+    /// other blocking work still gets it while ten reads wait for busy readers.
+    #[test]
+    fn waiting_reads_hold_no_threads() {
+        const READERS: usize = 2;
+        let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let db = open_with_readers(&dir, READERS);
+            let (releases, holders) = hold_every_reader(&db, READERS).await;
+
+            let ran = Arc::new(AtomicUsize::new(0));
+            let waiting: Vec<_> = (0..10)
+                .map(|_| {
+                    let (db, ran) = (db.clone(), ran.clone());
+                    tokio::spawn(async move {
+                        db.read(move |_| {
+                            ran.fetch_add(1, Ordering::SeqCst);
+                            Ok(())
+                        })
+                        .await
+                    })
+                })
+                .collect();
+            until_queued(&db, 10).await;
+
+            let other_work = within("other blocking work while reads waited", tokio::task::spawn_blocking(|| "done")).await;
+            assert_eq!(other_work.unwrap(), "done");
+            assert_eq!(ran.load(Ordering::SeqCst), 0, "no reader came free");
+
+            drop(releases);
+            all_succeed("the waiting reads ran once the readers came free", holders.into_iter().chain(waiting)).await;
+            assert_eq!(ran.load(Ordering::SeqCst), 10);
+        });
+    }
+
+    #[tokio::test]
+    async fn reads_run_in_the_order_they_were_queued() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        let (releases, holders) = hold_every_reader(&db, 1).await;
+
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut reads = Vec::new();
+        for n in 0..10 {
+            let (reader, order) = (db.clone(), order.clone());
+            reads.push(tokio::spawn(async move {
+                reader
+                    .read(move |_| {
+                        order.lock().unwrap().push(n);
+                        Ok(())
+                    })
+                    .await
+            }));
+            until_queued(&db, n + 1).await;
+        }
+
+        drop(releases);
+        all_succeed("the queued reads ran once the reader came free", holders.into_iter().chain(reads)).await;
+        assert_eq!(*order.lock().unwrap(), (0..10).collect::<Vec<_>>());
+    }
+
+    /// A queued read runs even when its caller stops waiting for it, because some reads broadcast
+    /// what a write committed (messages#create's): a request dropped as its client goes away must
+    /// not lose the broadcast.
+    #[tokio::test]
+    async fn a_read_given_up_while_it_waits_still_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        let (releases, holders) = hold_every_reader(&db, 1).await;
+
+        let (ran, runs) = oneshot::channel();
+        let abandoned = db.read(move |_| {
+            let _ = ran.send(());
+            Ok(())
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(50), abandoned).await.is_err(), "the reader is busy");
+        assert_eq!(queued(&db), 1, "the abandoned read is still queued");
+
+        drop(releases);
+        all_succeed("the holding read finished", holders).await;
+        within("the abandoned read ran", runs).await.expect("the abandoned read was dropped without running");
+    }
+
+    #[tokio::test]
+    async fn a_panicking_read_fails_and_leaves_its_reader_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        for _ in 0..3 {
+            assert!(within("the panicking read failed", db.read(|_| -> Result<()> { panic!("a bug in a read") })).await.is_err());
+        }
+        assert_eq!(within("a read after the panics", db.read(select_one)).await.unwrap(), 1);
+    }
+
+    /// No readers configured still starts one.
+    #[tokio::test]
+    async fn zero_configured_readers_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 0);
+        assert_eq!(within("the read", db.read(select_one)).await.unwrap(), 1);
+    }
+
+    /// Each reader thread holds the queue, so the queue going means they've all stopped.
+    #[test]
+    fn the_reader_threads_stop_with_the_last_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 3);
+        let other = db.clone();
+        let queue = Arc::downgrade(&db.readers.queue);
+        drop(db);
+        assert_eq!(queue.strong_count(), 4, "the other handle and the three readers");
+        drop(other);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while queue.strong_count() > 0 {
+            assert!(std::time::Instant::now() < deadline, "the reader threads are still running");
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]

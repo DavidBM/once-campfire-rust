@@ -40,17 +40,23 @@ impl Layout {
         let app = c.app();
         let secrets = app.secrets.clone();
         let user = concerns::current_user(c).cloned();
-        let (account, has_logo) = app
-            .read(|conn| {
+        let user_id = user.as_ref().map(|user| user.id);
+        let last_room = concerns::last_room_cookie(c);
+        // One trip to a reader for all three: each trip is a hand-off to a reader thread and back.
+        let (account, has_logo, last_room_visited_id) = app
+            .read(move |conn| {
                 let account = Account::first(conn)?;
                 let has_logo = match &account {
                     Some(account) => super::attachments::attached_blob(conn, "Account", account.id, "logo")?.is_some(),
                     None => false,
                 };
-                Ok((account, has_logo))
+                let last_room_visited_id = match user_id {
+                    Some(user_id) => concerns::last_room_visited_in(conn, user_id, last_room)?.map(|room| room.id),
+                    None => None,
+                };
+                Ok((account, has_logo, last_room_visited_id))
             })
             .await?;
-        let last_room_visited_id = if user.is_some() { concerns::last_room_visited(c).await?.map(|room| room.id) } else { None };
 
         Ok(Self {
             current_user: user.as_ref().map(|user| current_user(&secrets, user)),

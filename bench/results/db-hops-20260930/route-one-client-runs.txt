@@ -1,0 +1,45 @@
+== routes-cf21465 rep 1 07:51:07 load 7.79
+room_show      c=1       5788 req/s  p50   0.169 ms  p99   0.235 ms  cpu  176.8 µs/req  peak threads 15
+post_message   c=1       2614 req/s  p50   0.340 ms  p99   1.743 ms  cpu  382.5 µs/req  peak threads 15
+== routes-f1638d0 rep 1 07:51:15 load 7.21
+room_show      c=1       6013 req/s  p50   0.162 ms  p99   0.219 ms  cpu  167.4 µs/req  peak threads 15
+post_message   c=1       2601 req/s  p50   0.343 ms  p99   1.702 ms  cpu  385.6 µs/req  peak threads 15
+== routes-9f94135 rep 1 07:51:23 load 7.27
+room_show      c=1       5326 req/s  p50   0.169 ms  p99   0.347 ms  cpu  187.1 µs/req  peak threads 15
+post_message   c=1       2553 req/s  p50   0.352 ms  p99   1.788 ms  cpu  391.7 µs/req  peak threads 15
+== routes-cf21465 rep 2 07:51:31 load 7.06
+room_show      c=1       5646 req/s  p50   0.169 ms  p99   0.265 ms  cpu  181.8 µs/req  peak threads 15
+post_message   c=1       2076 req/s  p50   0.434 ms  p99   1.897 ms  cpu  475.3 µs/req  peak threads 15
+== routes-f1638d0 rep 2 07:51:39 load 7.21
+room_show      c=1       5564 req/s  p50   0.169 ms  p99   0.286 ms  cpu  182.7 µs/req  peak threads 15
+post_message   c=1       2180 req/s  p50   0.420 ms  p99   1.846 ms  cpu  455.7 µs/req  peak threads 15
+== routes-9f94135 rep 2 07:51:47 load 7.77
+room_show      c=1       5674 req/s  p50   0.166 ms  p99   0.278 ms  cpu  178.6 µs/req  peak threads 15
+post_message   c=1       2134 req/s  p50   0.420 ms  p99   1.951 ms  cpu  457.7 µs/req  peak threads 15
+== routes-cf21465 rep 3 07:51:55 load 7.73
+room_show      c=1       5108 req/s  p50   0.176 ms  p99   0.341 ms  cpu  196.4 µs/req  peak threads 15
+post_message   c=1       1905 req/s  p50   0.459 ms  p99   1.925 ms  cpu  501.8 µs/req  peak threads 15
+== routes-f1638d0 rep 3 07:52:04 load 8.79
+room_show      c=1       4949 req/s  p50   0.181 ms  p99   0.426 ms  cpu  201.4 µs/req  peak threads 15
+post_message   c=1       1977 req/s  p50   0.445 ms  p99   1.956 ms  cpu  492.3 µs/req  peak threads 15
+== routes-9f94135 rep 3 07:52:12 load 8.75
+room_show      c=1       5566 req/s  p50   0.167 ms  p99   0.287 ms  cpu  182.0 µs/req  peak threads 15
+post_message   c=1       2149 req/s  p50   0.419 ms  p99   1.928 ms  cpu  456.0 µs/req  peak threads 15
+== routes-cf21465 rep 4 07:52:20 load 8.61
+room_show      c=1       5438 req/s  p50   0.174 ms  p99   0.284 ms  cpu  188.2 µs/req  peak threads 15
+post_message   c=1       2402 req/s  p50   0.372 ms  p99   1.795 ms  cpu  412.2 µs/req  peak threads 15
+== routes-f1638d0 rep 4 07:52:28 load 8.28
+room_show      c=1       5858 req/s  p50   0.166 ms  p99   0.242 ms  cpu  173.6 µs/req  peak threads 15
+post_message   c=1       2439 req/s  p50   0.360 ms  p99   1.929 ms  cpu  404.5 µs/req  peak threads 15
+== routes-9f94135 rep 4 07:52:36 load 7.62
+room_show      c=1       5581 req/s  p50   0.169 ms  p99   0.288 ms  cpu  181.0 µs/req  peak threads 15
+post_message   c=1       1851 req/s  p50   0.425 ms  p99   2.080 ms  cpu  481.8 µs/req  peak threads 15
+== routes-cf21465 rep 5 07:52:44 load 7.73
+room_show      c=1       5541 req/s  p50   0.175 ms  p99   0.268 ms  cpu  184.7 µs/req  peak threads 15
+post_message   c=1       2344 req/s  p50   0.379 ms  p99   1.995 ms  cpu  418.0 µs/req  peak threads 15
+== routes-f1638d0 rep 5 07:52:52 load 7.15
+room_show      c=1       5817 req/s  p50   0.167 ms  p99   0.242 ms  cpu  175.9 µs/req  peak threads 15
+post_message   c=1       2317 req/s  p50   0.381 ms  p99   1.973 ms  cpu  421.5 µs/req  peak threads 15
+== routes-9f94135 rep 5 07:53:00 load 6.90
+room_show      c=1       5834 req/s  p50   0.167 ms  p99   0.235 ms  cpu  174.3 µs/req  peak threads 15
+post_message   c=1       2443 req/s  p50   0.369 ms  p99   1.785 ms  cpu  409.3 µs/req  peak threads 15

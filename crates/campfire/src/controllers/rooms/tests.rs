@@ -246,6 +246,37 @@ async fn the_last_room_cookie_is_set_only_when_it_changes() {
     assert!(last_room(&david.get(&format!("/rooms/{ALL_TALK}")).await));
 }
 
+/// Where a page's `link_back_to_last_room_visited` goes.
+fn back_link(html: &str) -> &str {
+    let link = &html[..html.find("Go Back</span></a>").expect("a back link")];
+    let tag = &link[link.rfind("<a ").unwrap()..];
+    let href = &tag[tag.find(r#"href=""#).unwrap() + 6..];
+    &href[..href.find('"').unwrap()]
+}
+
+/// The layout's `last_room_visited`: the `last_room` cookie's room when the user is in it, else
+/// their first room.
+#[tokio::test]
+async fn back_links_go_to_the_last_room_visited() {
+    let Some(app) = TestApp::boot().await else { return };
+    let original = app.db().read(|conn| Room::original_for_user(conn, DAVID)).await.unwrap().unwrap().id;
+    assert_ne!(original, QUIET_CORNER);
+    let mut david = app.david();
+    let back_link_of = |reply: Reply| {
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+        back_link(&reply.text()).to_string()
+    };
+
+    assert_eq!(back_link_of(david.get("/rooms/opens/new").await), format!("/rooms/{original}"), "no cookie");
+    david.get(&format!("/rooms/{QUIET_CORNER}")).await;
+    assert_eq!(back_link_of(david.get("/rooms/opens/new").await), format!("/rooms/{QUIET_CORNER}"));
+    assert_eq!(back_link_of(david.get("/account/edit").await), format!("/rooms/{QUIET_CORNER}"));
+    david.set_cookie("last_room", &DIRECT_KEVIN_BENDER.to_string());
+    assert_eq!(back_link_of(david.get("/rooms/opens/new").await), format!("/rooms/{original}"), "a room he isn't in");
+    david.set_cookie("last_room", "nonsense");
+    assert_eq!(back_link_of(david.get("/rooms/opens/new").await), format!("/rooms/{original}"));
+}
+
 #[tokio::test]
 async fn a_room_page_has_the_same_etag_cold_and_warm() {
     let Some(app) = TestApp::boot().await else { return };

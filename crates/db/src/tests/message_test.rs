@@ -153,6 +153,51 @@ fn sound_messages() {
     assert_eq!(t.read(|c| message.content_type(c, &BasicRichText)), crate::ContentType::Text);
 }
 
+/// `create_message` answers with what `Message::create` returns, without reading it back, so that
+/// has to be the row as stored: after the commit's hooks, at the microseconds the columns keep.
+#[test]
+fn create_returns_the_row_as_stored() {
+    let t = TestDb::new();
+    let blob_id = |key: &str| {
+        let blob = Blob {
+            id: 0,
+            key: key.into(),
+            filename: "moon.jpg".into(),
+            content_type: Some("image/jpeg".into()),
+            metadata: None,
+            service_name: "local".into(),
+            byte_size: 1,
+            checksum: None,
+            created_at: t.now(),
+        };
+        t.write(move |tx| Ok(Blob::create(tx, &blob)?.id))
+    };
+    let new = |body: Option<&str>, attachment_blob_id: Option<i64>, client_message_id: Option<&str>| NewMessage {
+        room_id: id("designers"),
+        creator_id: id("david"),
+        client_message_id: client_message_id.map(Into::into),
+        body: body.map(Into::into),
+        attachment_blob_id,
+    };
+    let cases = [
+        new(Some("<p>Hello <strong>there</strong></p>"), None, Some("text")),
+        new(Some(""), None, Some("empty body")),
+        new(None, None, Some("nothing")),
+        new(None, Some(blob_id("attachment")), Some("attachment")),
+        new(Some("With a picture"), Some(blob_id("both")), Some("both")),
+        new(Some("no client id"), None, None),
+    ];
+    for (n, attributes) in cases.into_iter().enumerate() {
+        if n == 1 {
+            // A frozen clock with nanoseconds, which the columns don't keep.
+            t.clock.travel_to(jiff::Timestamp::new(1_900_000_000, 123_456_789).unwrap());
+        }
+        let created = t.write(move |tx| Message::create(tx, attributes));
+        let id = created.id;
+        assert_eq!(created, t.read(|c| Message::find(c, id)), "case {n}");
+    }
+}
+
 #[test]
 fn client_message_id_defaults_to_a_uuid() {
     let t = TestDb::new();

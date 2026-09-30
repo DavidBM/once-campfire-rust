@@ -12,7 +12,8 @@
 //! - `DISABLE_SSL`: `config/environments/production.rb` (`assume_ssl`/`force_ssl` unless present).
 //! - `APP_VERSION`, `GIT_REVISION`: `config/initializers/version.rb` (`X-Version`, `X-Rev`).
 //! - `RAILS_ENV`: names the database file (`storage/db/<env>.sqlite3`, `config/database.yml`).
-//! - `RAILS_MAX_THREADS`: `config/database.yml` pool size, used for the reader pool.
+//! - `RAILS_MAX_THREADS`: `config/database.yml` pool size, used for the number of reader threads,
+//!   each with a reader connection of its own (`campfire_db::Database`).
 //! - `JOB_CONCURRENCY`: Resque worker count (`config/puma.rb`), used for job concurrency.
 //! - `RAILS_LOG_LEVEL`: `config/environments/production.rb` log level.
 //! - Thruster's (`TLS_DOMAIN`, `HTTP_PORT`, `HTTP_*_TIMEOUT`, `TARGET_PORT`, ...): read by
