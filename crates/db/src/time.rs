@@ -53,10 +53,6 @@ impl Timestamp {
         Self::from_jiff(self.0 - duration)
     }
 
-    pub fn since(self, duration: SignedDuration) -> Self {
-        Self::from_jiff(self.0 + duration)
-    }
-
     /// The exact text Active Record writes to SQLite.
     pub fn to_db(self) -> String {
         let base = self.0.strftime("%Y-%m-%d %H:%M:%S").to_string();
