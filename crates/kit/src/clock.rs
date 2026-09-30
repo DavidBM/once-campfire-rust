@@ -1,55 +1,15 @@
-//! Wall-clock time behind a trait, so parity runs can freeze it.
+//! The process clock, and the HTTP layer's date arithmetic and formats.
 //!
 //! Set `CAMPFIRE_FROZEN_TIME` (an RFC 3339 timestamp such as `2024-06-01T12:00:00Z`) to pin
 //! `now()` for the whole process; [`from_env`] reads it at boot.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
+
+pub use rails_compat::clock::{Clock, SharedClock, SystemClock, TestClock};
 
 pub const FROZEN_TIME_ENV: &str = "CAMPFIRE_FROZEN_TIME";
-
-pub trait Clock: Send + Sync + std::fmt::Debug {
-    fn now(&self) -> Timestamp;
-}
-
-pub type SharedClock = Arc<dyn Clock>;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> Timestamp {
-        Timestamp::now()
-    }
-}
-
-/// A clock that only moves when told to.
-#[derive(Debug)]
-pub struct FrozenClock {
-    now: Mutex<Timestamp>,
-}
-
-impl FrozenClock {
-    pub fn new(now: Timestamp) -> Self {
-        Self { now: Mutex::new(now) }
-    }
-
-    pub fn set(&self, now: Timestamp) {
-        *self.now.lock().unwrap() = now;
-    }
-
-    pub fn advance(&self, by: SignedDuration) {
-        let mut now = self.now.lock().unwrap();
-        *now = now.checked_add(by).expect("frozen clock overflow");
-    }
-}
-
-impl Clock for FrozenClock {
-    fn now(&self) -> Timestamp {
-        *self.now.lock().unwrap()
-    }
-}
 
 /// The process clock: frozen at `CAMPFIRE_FROZEN_TIME` when set, the system clock otherwise.
 pub fn from_env() -> anyhow::Result<SharedClock> {
@@ -57,7 +17,7 @@ pub fn from_env() -> anyhow::Result<SharedClock> {
         Ok(value) if !value.trim().is_empty() => {
             let now: Timestamp =
                 value.trim().parse().map_err(|e| anyhow::anyhow!("{FROZEN_TIME_ENV}={value:?} is not an RFC 3339 timestamp: {e}"))?;
-            Ok(Arc::new(FrozenClock::new(now)))
+            Ok(Arc::new(TestClock::frozen_at(now)))
         }
         _ => Ok(Arc::new(SystemClock)),
     }
@@ -81,15 +41,6 @@ pub fn parse_httpdate(value: &str) -> Option<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn frozen_clock_moves_only_when_told() {
-        let t: Timestamp = "2024-06-01T12:00:00Z".parse().unwrap();
-        let clock = FrozenClock::new(t);
-        assert_eq!(clock.now(), t);
-        clock.advance(SignedDuration::from_secs(60));
-        assert_eq!(clock.now().to_string(), "2024-06-01T12:01:00Z");
-    }
 
     #[test]
     fn twenty_years_is_calendar_years() {

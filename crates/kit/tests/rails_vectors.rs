@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, header};
-use campfire_kit::{Ctx, FrozenClock, Kit, KitConfig, RailsCrypto, Result, StatusCode, action};
+use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, Result, StatusCode, TestClock, action};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -32,7 +32,7 @@ async fn whoami(c: &mut Ctx) -> Result {
 fn app(vectors: &Value) -> (Router, Arc<rails_compat::Secrets>) {
     let secrets = Arc::new(rails_compat::Secrets::new(vectors["secret_key_base"].as_str().unwrap()));
     let now = vectors["now"].as_str().unwrap().parse().unwrap();
-    let kit = Kit::new(KitConfig::default(), Arc::new(RailsCrypto::new(secrets.clone())), Arc::new(FrozenClock::new(now)), ());
+    let kit = Kit::new(KitConfig::default(), Arc::new(RailsCrypto::new(secrets.clone())), Arc::new(TestClock::frozen_at(now)), ());
     let router = Router::new().route("/session", action_post()).route("/whoami", campfire_kit::get(whoami));
     (campfire_kit::app(router, kit), secrets)
 }

@@ -1,4 +1,4 @@
-//! Rails' SQLite datetime encoding and the injectable clock.
+//! Rails' SQLite datetime encoding.
 //!
 //! Rails writes `datetime(6)` columns as UTC text, `"%Y-%m-%d %H:%M:%S"` followed by
 //! `".%06d"` microseconds only when the microseconds are non-zero
@@ -8,7 +8,6 @@
 //! which has millisecond precision; see [`SQLITE_NOW`].
 
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 use jiff::{SignedDuration, Timestamp as JiffTimestamp};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
@@ -122,70 +121,6 @@ impl FromSql for Timestamp {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let text = value.as_str()?;
         Timestamp::parse_db(text).ok_or_else(|| FromSqlError::Other(format!("invalid datetime {text:?}").into()))
-    }
-}
-
-/// Where models get `Time.current` from.
-pub trait Clock: Send + Sync {
-    fn now(&self) -> Timestamp;
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> Timestamp {
-        Timestamp::from_jiff(JiffTimestamp::now())
-    }
-}
-
-/// A clock for tests: real time shifted by `travel`, or frozen with `travel_to`
-/// (like `ActiveSupport::Testing::TimeHelpers`).
-#[derive(Debug, Clone, Default)]
-pub struct TestClock {
-    state: Arc<Mutex<TestClockState>>,
-}
-
-#[derive(Debug, Default)]
-struct TestClockState {
-    offset: SignedDuration,
-    frozen: Option<Timestamp>,
-}
-
-impl TestClock {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn frozen_at(at: Timestamp) -> Self {
-        let clock = Self::new();
-        clock.travel_to(at);
-        clock
-    }
-
-    /// `travel_to`: freezes time at `at`.
-    pub fn travel_to(&self, at: Timestamp) {
-        self.state.lock().unwrap().frozen = Some(at);
-    }
-
-    /// `travel`: moves the clock forward by `by` (keeping it frozen if it was).
-    pub fn travel(&self, by: SignedDuration) {
-        let mut state = self.state.lock().unwrap();
-        match state.frozen {
-            Some(at) => state.frozen = Some(at.since(by)),
-            None => state.offset += by,
-        }
-    }
-
-    pub fn travel_back(&self) {
-        *self.state.lock().unwrap() = TestClockState::default();
-    }
-}
-
-impl Clock for TestClock {
-    fn now(&self) -> Timestamp {
-        let state = self.state.lock().unwrap();
-        state.frozen.unwrap_or_else(|| SystemClock.now().since(state.offset))
     }
 }
 

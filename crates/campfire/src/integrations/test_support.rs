@@ -294,7 +294,8 @@ pub struct TestDb {
 
 impl TestDb {
     pub fn new() -> Self {
-        use campfire_db::{BasicRichText, Config, Database, Env, NullSink, TestClock, fixtures};
+        use campfire_db::{BasicRichText, Config, Database, Env, NullSink, fixtures};
+        use campfire_kit::TestClock;
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path = std::env::temp_dir().join(format!("campfire-integrations-{}-{n}", std::process::id()));

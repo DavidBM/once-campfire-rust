@@ -159,7 +159,7 @@ fn recording_searches_keeps_the_ten_most_recent() {
 #[test]
 fn timestamps_are_written_like_active_record() {
     let t = TestDb::new();
-    t.clock.travel_to(Timestamp::parse_db("2026-09-26 12:34:56.123456").unwrap());
+    t.clock.travel_to(Timestamp::parse_db("2026-09-26 12:34:56.123456").unwrap().jiff());
     let attributes = NewMessage { room_id: id("hq"), creator_id: id("david"), body: Some("x".into()), ..Default::default() };
     let message = t.write(move |tx| Message::create(tx, attributes));
     let (created_at, typeof_created): (String, String) = t.read(|c| {
@@ -167,7 +167,7 @@ fn timestamps_are_written_like_active_record() {
     });
     assert_eq!((created_at.as_str(), typeof_created.as_str()), ("2026-09-26 12:34:56.123456", "text"));
 
-    t.clock.travel_to(Timestamp::parse_db("2026-09-26 12:00:00").unwrap());
+    t.clock.travel_to(Timestamp::parse_db("2026-09-26 12:00:00").unwrap().jiff());
     let attributes = NewMessage { room_id: id("hq"), creator_id: id("david"), body: Some("y".into()), ..Default::default() };
     let message = t.write(move |tx| Message::create(tx, attributes));
     let created_at: String = t.read(|c| Ok(c.query_row("SELECT created_at FROM messages WHERE id = ?", [message.id], |r| r.get(0))?));

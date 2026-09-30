@@ -13,16 +13,18 @@ mod user_test;
 
 use std::sync::Arc;
 
+use rails_compat::clock::{Clock, TestClock};
+
 use crate::fixtures::{self, identify};
 use crate::rich_text::BasicRichText;
-use crate::{Config, Connection, Database, Env, Event, RecordingSink, Result, TestClock, Tx};
+use crate::{Config, Connection, Database, Env, Event, RecordingSink, Result, Timestamp, Tx};
 
 /// A database loaded with the fixtures, a recording event sink and a controllable clock
 /// (`fixtures :all` plus `ActiveSupport::Testing::TimeHelpers`).
 pub struct TestDb {
     pub db: Database,
     pub sink: RecordingSink,
-    pub clock: TestClock,
+    pub clock: Arc<TestClock>,
     _dir: tempfile::TempDir,
 }
 
@@ -30,8 +32,8 @@ impl TestDb {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let sink = RecordingSink::new();
-        let clock = TestClock::new();
-        let env = Env { clock: Arc::new(clock.clone()), sink: Arc::new(sink.clone()), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
+        let clock = Arc::new(TestClock::new());
+        let env = Env { clock: clock.clone(), sink: Arc::new(sink.clone()), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
         let mut config = Config::new(dir.path().join("test.sqlite3"));
         config.readers = 2;
         config.environment = "test".into();
@@ -56,8 +58,8 @@ impl TestDb {
         self.db.read_blocking(f).unwrap()
     }
 
-    pub fn now(&self) -> crate::Timestamp {
-        crate::Clock::now(&self.clock)
+    pub fn now(&self) -> Timestamp {
+        Timestamp::from_jiff(self.clock.now())
     }
 
     pub fn events(&self) -> Vec<Event> {

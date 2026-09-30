@@ -26,7 +26,7 @@ pub use events::{Event, EventSink, NullSink, RecordingSink};
 pub use models::*;
 pub use rich_text::{BasicRichText, RichText};
 pub use rusqlite::Connection;
-pub use time::{Clock, SystemClock, TestClock, Timestamp};
+pub use time::Timestamp;
 
 #[cfg(test)]
 mod tests;

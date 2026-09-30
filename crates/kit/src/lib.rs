@@ -40,7 +40,7 @@ pub mod testing;
 
 pub use adapter::{ActionFn, OriginalMethod, RequestId, action, app, delete, get, patch, post, put};
 pub use app::{Kit, KitConfig};
-pub use clock::{Clock, FrozenClock, SharedClock, SystemClock};
+pub use clock::{Clock, SharedClock, SystemClock, TestClock};
 pub use cookies::{Cookie, CookieJar, SameSite};
 pub use crypto::{Crypto, RailsCrypto, SharedCrypto};
 pub use ctx::{Ctx, Freshness, Redirect};

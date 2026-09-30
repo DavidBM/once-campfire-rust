@@ -7,8 +7,8 @@ use std::time::Duration;
 use campfire_cable::Config;
 use campfire_db::fixtures::{self, identify};
 use campfire_db::rich_text::BasicRichText;
-use campfire_db::{Boost, Database, Event, EventSink, Membership, Message, Room, Session, TestClock};
-use campfire_kit::{Crypto, RailsCrypto, SystemClock};
+use campfire_db::{Boost, Database, Event, EventSink, Membership, Message, Room, Session, Timestamp};
+use campfire_kit::{Clock, Crypto, RailsCrypto, TestClock};
 use futures_util::{SinkExt, StreamExt};
 use rails_compat::Secrets;
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ pub struct TestApp {
     pub server: Cable,
     pub broadcasts: Broadcasts,
     pub secrets: Arc<Secrets>,
-    pub clock: TestClock,
+    pub clock: Arc<TestClock>,
     pub url: String,
     pub origin: String,
     _dir: tempfile::TempDir,
@@ -49,8 +49,8 @@ pub struct TestApp {
 pub async fn start() -> TestApp {
     let dir = tempfile::tempdir().unwrap();
     let sink = Arc::new(CableSink::default());
-    let clock = TestClock::new();
-    let env = campfire_db::Env { clock: Arc::new(clock.clone()), sink: sink.clone(), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
+    let clock = Arc::new(TestClock::new());
+    let env = campfire_db::Env { clock: clock.clone(), sink: sink.clone(), rich_text: Arc::new(BasicRichText), bcrypt_cost: 4 };
     let mut config = campfire_db::Config::new(dir.path().join("test.sqlite3"));
     config.readers = 2;
     config.environment = "test".into();
@@ -63,12 +63,7 @@ pub async fn start() -> TestApp {
     .unwrap();
 
     let secrets = Arc::new(Secrets::new(SECRET_KEY_BASE));
-    let deps = Deps {
-        db: db.clone(),
-        secrets: secrets.clone(),
-        crypto: Arc::new(RailsCrypto::new(secrets.clone())),
-        clock: Arc::new(SystemClock),
-    };
+    let deps = Deps { db: db.clone(), secrets: secrets.clone(), crypto: Arc::new(RailsCrypto::new(secrets.clone())), clock: clock.clone() };
     let server = channels::server(deps, Config { assume_ssl: false, ..Config::default() });
     let _ = sink.server.set(server.clone());
 
@@ -94,6 +89,11 @@ pub fn id(label: &str) -> i64 {
 }
 
 impl TestApp {
+    /// `Time.current` on the clock the database and the cable server share.
+    pub fn now(&self) -> Timestamp {
+        Timestamp::from_jiff(self.clock.now())
+    }
+
     /// A session cookie for the fixture user (`cookies.signed[:session_token]`).
     pub async fn cookie_for(&self, user: &str) -> String {
         let user_id = id(user);
@@ -102,7 +102,11 @@ impl TestApp {
     }
 
     pub fn cookie_with_token(&self, token: &str) -> String {
-        let signed = RailsCrypto::new(self.secrets.clone()).sign_cookie("session_token", token, None);
+        self.cookie_with_token_expiring(token, None)
+    }
+
+    pub fn cookie_with_token_expiring(&self, token: &str, expires_at: Option<jiff::Timestamp>) -> String {
+        let signed = RailsCrypto::new(self.secrets.clone()).sign_cookie("session_token", token, expires_at);
         format!("session_token={}", signed.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D"))
     }
 

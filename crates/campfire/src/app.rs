@@ -126,8 +126,7 @@ async fn open_database(config: &Config, clock: SharedClock, jobs: jobs::Jobs, ri
     let mut db_config = campfire_db::Config::new(&config.storage.database);
     db_config.readers = config.db_readers;
     db_config.environment = config.environment.clone();
-    let env =
-        campfire_db::Env { clock: Arc::new(DbClock(clock)), sink: Arc::new(jobs), rich_text, bcrypt_cost: rails_compat::password::COST };
+    let env = campfire_db::Env { clock, sink: Arc::new(jobs), rich_text, bcrypt_cost: rails_compat::password::COST };
     Ok(tokio::task::spawn_blocking(move || Database::open(db_config, env)).await??)
 }
 
@@ -184,15 +183,6 @@ fn error_pages() -> ErrorPages {
         let request = campfire_assets::StaticRequest { method: "GET", path: &path, ..Default::default() };
         campfire_assets::serve(&request).map(|page| (status, page.body.into_owned().into()))
     }))
-}
-
-/// The process clock (frozen with `CAMPFIRE_FROZEN_TIME`) as the models' clock.
-struct DbClock(SharedClock);
-
-impl campfire_db::Clock for DbClock {
-    fn now(&self) -> campfire_db::Timestamp {
-        campfire_db::Timestamp::from_jiff(self.0.now())
-    }
 }
 
 // --- Commands --------------------------------------------------------------------------------------

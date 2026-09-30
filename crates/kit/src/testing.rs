@@ -12,7 +12,7 @@ use jiff::Timestamp;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::clock::{FrozenClock, SharedClock};
+use crate::clock::{SharedClock, TestClock};
 use crate::crypto::{Crypto, SharedCrypto};
 
 pub const TEST_TIME: &str = "2024-06-01T12:00:00Z";
@@ -22,7 +22,7 @@ pub fn crypto() -> SharedCrypto {
 }
 
 pub fn frozen_clock() -> SharedClock {
-    Arc::new(FrozenClock::new(TEST_TIME.parse().unwrap()))
+    Arc::new(TestClock::frozen_at(TEST_TIME.parse().unwrap()))
 }
 
 #[derive(Debug, Clone)]
