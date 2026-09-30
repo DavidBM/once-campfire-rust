@@ -67,7 +67,7 @@ pub async fn edit(c: &mut Ctx) -> Result {
     let room_id = room.id;
     let (selected_users, unselected_users) = c
         .app()
-        .read(move |conn| {
+        .read_offloaded(move |conn| {
             let selected_ids = Room::find(conn, room_id)?.user_ids(conn)?;
             let (selected, unselected): (Vec<User>, Vec<User>) =
                 User::active_ordered(conn)?.into_iter().partition(|user| selected_ids.contains(&user.id));

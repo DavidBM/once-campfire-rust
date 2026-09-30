@@ -20,7 +20,9 @@ pub async fn index(c: &mut Ctx) -> Result {
     let secrets = c.app().secrets.clone();
     let bots: Vec<_> = c
         .app()
-        .read(move |conn| User::active_bots_ordered(conn)?.iter().map(|bot| presenters::accounts::bot(conn, &secrets, bot)).collect())
+        .read_offloaded(move |conn| {
+            User::active_bots_ordered(conn)?.iter().map(|bot| presenters::accounts::bot(conn, &secrets, bot)).collect()
+        })
         .await?;
     framed_page!(c, StatusCode::OK, |ctx| accounts::BotsIndex { ctx, bots: bots.clone() }).await
 }

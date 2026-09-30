@@ -61,6 +61,16 @@ impl AppState {
         self.db.read(f).await.map_err(db_error)
     }
 
+    /// `db.read_offloaded` for actions (reads whose cost grows with the whole database), with
+    /// errors mapped as [`AppState::read`] maps them.
+    pub async fn read_offloaded<T, F>(&self, f: F) -> campfire_kit::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Connection) -> campfire_db::Result<T> + Send + 'static,
+    {
+        self.db.read_offloaded(f).await.map_err(db_error)
+    }
+
     /// `db.write` for actions, whose errors become responses as [`db_error`] maps them.
     pub async fn write<T, F>(&self, f: F) -> campfire_kit::Result<T>
     where

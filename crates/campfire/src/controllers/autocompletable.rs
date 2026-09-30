@@ -36,7 +36,7 @@ pub mod users {
             .find(|param| param.is_present())
             .and_then(|param| param.to_s());
 
-        let users = c.app().read(move |conn| autocompletable_users(conn, room_id, query.as_deref())).await?;
+        let users = c.app().read_offloaded(move |conn| autocompletable_users(conn, room_id, query.as_deref())).await?;
         let page = Page::new(c.param_str("page"), users.len() as i64, &[20]);
         let secrets = c.app().secrets.clone();
         let users: Vec<_> = page.records(&users).iter().map(|user| presenters::accounts::mention_user(&secrets, user)).collect();

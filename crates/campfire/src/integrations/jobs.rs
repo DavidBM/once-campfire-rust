@@ -29,8 +29,9 @@ async fn push_message(app: App, event: Event) -> anyhow::Result<()> {
     let Event::PushMessage { message_id, .. } = event else { return Ok(()) };
     let Some(pool) = app.web_push.clone() else { return Ok(()) };
     let db = app.db.clone();
+    // Offloaded: it encrypts a notification for every subscriber.
     app.db
-        .read(move |conn| {
+        .read_offloaded(move |conn| {
             let message = Message::find(conn, message_id)?;
             web_push::push_message(&pool, conn, &*db.env().rich_text, &message, db.env().now()).map(|_| ())
         })

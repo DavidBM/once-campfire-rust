@@ -27,7 +27,7 @@ pub async fn edit(c: &mut Ctx) -> Result {
     let account = current_account(c).await?;
     c.respond_to(&[&format::HTML])?;
     let can_administer = current_user(c).is_some_and(|user| user.can_administer(None, false));
-    let users = c.app().read(move |conn| presenters::accounts::account_users(conn, can_administer)).await?;
+    let users = c.app().read_offloaded(move |conn| presenters::accounts::account_users(conn, can_administer)).await?;
     let page = Page::new(c.param_str("page"), users.len() as i64, PER_PAGE);
 
     let secrets = c.app().secrets.clone();
