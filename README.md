@@ -371,6 +371,8 @@ Deliberate:
   schema if it's missing (a one-time 49 ms for 236k messages). Rails' schema pages a room's messages
   through `index_messages_on_room_id` alone, which sorts the room's whole history for every page.
   The index is additive, so the database still works with the Rails image.
+- **The database isn't memory-mapped.** Rails sets SQLite's `mmap_size` to 128 MB; without it,
+  posting a message takes about 15% less CPU. Reads go through SQLite's page cache instead.
 - **Leaner libvips and ffmpeg.** The image builds both from the same Debian sources as the Rails
   image, leaving out what Campfire can't reach (see [Running it](#running-it)). Thumbnails, video
   posters and metadata come out byte for byte the same for every image and video format either
