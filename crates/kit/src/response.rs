@@ -74,10 +74,11 @@ impl Response {
         self.header(header::CONTENT_TYPE, content_type)
     }
 
-    /// Set (replace) a header. Panics on an invalid header value, which is a programming error.
+    /// Set (replace) a header, as Puma would write the value (see `set_header_value`). Panics on
+    /// an invalid header name, which is a programming error.
     pub fn header(mut self, name: impl TryInto<HeaderName>, value: &str) -> Self {
         let name = name.try_into().unwrap_or_else(|_| panic!("invalid header name"));
-        self.headers.insert(name, HeaderValue::from_str(value).expect("invalid header value"));
+        set_header_value(&mut self.headers, name, value);
         self
     }
 
@@ -95,6 +96,27 @@ impl Response {
             Body::Bytes(bytes) => Some(bytes),
             _ => None,
         }
+    }
+}
+
+/// Replaces `name` with `value` the way Puma writes a Rack header (puma 7.2.1,
+/// `Puma::Request#str_headers`). A value with a line break goes out one line per header line
+/// (`split("\n")`, which drops trailing empty lines), and a line holding any other control
+/// character (`ILLEGAL_HEADER_VALUE_REGEX`) is left out. Values come from the request at times,
+/// like `?disposition=` on a proxied blob. Puma writes a DEL, which Thruster then refuses with a
+/// 502; that line is left out too.
+pub(crate) fn set_header_value(headers: &mut HeaderMap, name: HeaderName, value: &str) {
+    if let Ok(value) = HeaderValue::from_str(value) {
+        headers.insert(name, value);
+        return;
+    }
+    headers.remove(&name);
+    let mut lines: Vec<&str> = value.split('\n').collect();
+    while lines.last() == Some(&"") {
+        lines.pop();
+    }
+    for line in lines.into_iter().filter_map(|line| HeaderValue::from_str(line).ok()) {
+        headers.append(name.clone(), line);
     }
 }
 
@@ -366,6 +388,25 @@ pub struct ExpiresIn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_values_with_control_characters_go_out_as_puma_writes_them() {
+        let values = |value: &str| {
+            let response = Response::new(StatusCode::OK).header("x-test", "replaced").header("x-test", value);
+            response.headers.get_all("x-test").iter().map(|v| v.as_bytes().to_vec()).collect::<Vec<_>>()
+        };
+        assert_eq!(values("a\tb"), [b"a\tb".to_vec()]);
+        assert_eq!(values("é"), ["é".as_bytes().to_vec()]);
+        assert_eq!(values(""), [b"".to_vec()]);
+        // Each line on its own, and a line with a control character left out.
+        assert_eq!(values("x\ny; z"), [b"x".to_vec(), b"y; z".to_vec()]);
+        assert_eq!(values("\na\n\n"), [b"".to_vec(), b"a".to_vec()]);
+        assert_eq!(values("x\r\ny"), [b"y".to_vec()]);
+        assert!(values("x\ry").is_empty());
+        assert!(values("x\u{1}y").is_empty());
+        assert!(values("x\u{7f}y").is_empty());
+        assert!(values("\n").is_empty());
+    }
 
     #[test]
     fn content_disposition_like_rails() {

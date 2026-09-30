@@ -410,6 +410,10 @@ Deliberate:
   image's settings (60 and 300 seconds) idle connections close after 60 seconds either way; without
   them the defaults are 60 and 30, so an idle HTTP/1 connection closes after 30 seconds. HTTP/2
   connections get the idle timeout.
+- **A response header line holding a DEL is left out.** Header values that come from the request,
+  like `?disposition=` on a proxied blob, go out as Puma writes them: line by line, leaving out the
+  lines that hold control characters. Puma writes a DEL, and Thruster turns the response into a
+  502; the app leaves that line out like the others.
 - **Media is processed off the database writer.** Rails saves a blob's row and then uploads its
   file after commit; here the upload is copied into storage first, straight from the request's
   tempfile, and deleted again if the save fails. Variants, video posters and analysis run on
