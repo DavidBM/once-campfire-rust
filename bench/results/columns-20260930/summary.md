@@ -32,5 +32,32 @@ nothing is formatted per call.
 
 ## HTTP A/B
 
-To be added by the coordinator: `bench/attrib` over room_show, messages_page, sidebar and search
-(c=1 and c=16), with main against `perf-columns`.
+Measured over HTTP alongside the other page-path branches, in
+[`hot-paths-http-20260930`](../hot-paths-http-20260930/summary.md): `main` at `0dbd10d` (the same code
+as `d93d3dd`) against `6644d5f`, native release builds interleaved over 5 reps. Another project
+raised the host's load average from 5 to 16 during the run. At one client, req/s moves by up to 20%
+between reps of the same build. Medians:
+
+| Route | Clients | main req/s | branch req/s | main CPU µs/req | branch CPU µs/req | p99 main → branch |
+|---|---|---|---|---|---|---|
+| room_show | 1 | 4,922 | 4,824 (0.98×) | 196.6 | 199.8 (+3.2) | 0.28 → 0.30 ms |
+| room_show | 16 | 19,496 | 19,832 (1.02×) | 195.9 | 190.0 (-5.9) | 1.56 → 1.54 ms |
+| room_show | 64 | 19,281 | 19,367 (1.00×) | 195.9 | 190.4 (-5.5) | 5.64 → 5.40 ms |
+| messages_page | 1 | 5,503 | 5,082 (0.92×) | 179.2 | 182.2 (+3.0) | 0.27 → 0.34 ms |
+| messages_page | 16 | 22,442 | 22,539 (1.00×) | 164.4 | 159.2 (-5.2) | 1.53 → 1.54 ms |
+| messages_page | 64 | 22,514 | 23,624 (1.05×) | 164.6 | 159.8 (-4.8) | 4.84 → 4.46 ms |
+| sidebar | 1 | 4,747 | 5,990 (1.26×) | 193.0 | 160.3 (-32.7) | 0.33 → 0.25 ms |
+| sidebar | 16 | 21,485 | 23,171 (1.08×) | 169.0 | 159.1 (-9.9) | 1.57 → 1.47 ms |
+| sidebar | 64 | 22,186 | 22,927 (1.03×) | 166.6 | 159.8 (-6.8) | 5.02 → 4.83 ms |
+| search | 1 | 5,758 | 6,120 (1.06×) | 165.2 | 161.4 (-3.8) | 0.28 → 0.28 ms |
+| search | 16 | 22,490 | 22,444 (1.00×) | 161.7 | 160.7 (-1.0) | 1.50 → 1.54 ms |
+| search | 64 | 23,128 | 23,491 (1.02×) | 161.6 | 159.7 (-1.9) | 4.57 → 4.45 ms |
+| post_message | 1 | 1,856 | 1,871 (1.01×) | 551.7 | 570.8 (+19.1) | 1.83 → 1.84 ms |
+| post_message | 16 | 5,343 | 5,198 (0.97×) | 552.9 | 564.6 (+11.7) | 8.01 → 8.70 ms |
+| post_message | 64 | 5,471 | 5,154 (0.94×) | 547.4 | 547.6 (+0.2) | 19.63 → 27.52 ms |
+
+At 16 and 64 clients, room_show and messages_page save about 5 µs of CPU per request, and the
+sidebar 7–10 µs (3–6%). That is what the in-process row timings predict: about 140 ns per message
+row over a 40-message page, and 750 ns per sidebar row over 12. Throughput changes of that size are
+within this run's noise. So are the one-client rows and post_message, which moves in both
+directions between reps of the same build.
