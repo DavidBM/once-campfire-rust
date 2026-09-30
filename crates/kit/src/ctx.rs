@@ -1,6 +1,7 @@
 //! `Ctx`: everything a controller action touches, in place of a Rails controller instance.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::http::header::{self, HeaderName, HeaderValue};
@@ -12,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::app::Kit;
 use crate::clock::{self, SharedClock};
 use crate::cookies::CookieJar;
-use crate::deflater::splice::PageParts;
+use crate::deflater::BodyDigest;
 use crate::format::{self, Format, InvalidMimeType, NegotiationInput};
 use crate::params::{Param, ParamMap};
 use crate::request::Request;
@@ -322,6 +323,18 @@ impl Ctx {
     pub fn render(&mut self, status: StatusCode, template: Format, body: impl Into<Bytes>) -> Response {
         self.rendered_format = Some(template);
         self.render_as(status, &format!("{}; charset=utf-8", template.string), body)
+    }
+
+    /// [`Ctx::render`] for a template that recorded where its cached fragments went: its `text`
+    /// with each of `fragments` spliced in at its byte offset (see [`Body::spliced`]).
+    ///
+    /// # Panics
+    ///
+    /// On offsets [`Body::spliced`] rejects.
+    pub fn render_spliced(&mut self, status: StatusCode, template: Format, text: String, fragments: Vec<(usize, Arc<String>)>) -> Response {
+        let mut response = self.render(status, template, Bytes::new());
+        response.body = Body::spliced(text, fragments);
+        response
     }
 
     /// `render turbo_stream:` (`text/vnd.turbo-stream.html`).
@@ -668,29 +681,30 @@ fn is_fresh(request: &Request, etag: Option<&str>, last_modified: Option<&str>) 
 fn rack_etag(response: &mut Response, digestible: bool) {
     let mut digested = false;
     let skip = !digestible || response.headers.contains_key(header::ETAG) || response.headers.contains_key(header::LAST_MODIFIED);
-    let digests = matches!(response.status.as_u16(), 200 | 201) && !skip;
-    if let Body::Bytes(bytes) = &response.body {
-        // A page with cached fragments splits at them. Any other page that's digested anyway is one
-        // text part, so the SHA-256 it already needs also keys its stored gzip piece: a page that
-        // renders the same (the sidebar, say) compresses once instead of on every request.
-        let parts = if response.cached_fragments.is_empty() { None } else { PageParts::new(bytes, &response.cached_fragments) };
-        response.page_parts = parts.or_else(|| if digests { PageParts::whole(bytes) } else { None }).map(std::sync::Arc::new);
-    }
-    if digests
-        && let Body::Bytes(bytes) = &response.body
-        && !bytes.is_empty()
+    if matches!(response.status.as_u16(), 200 | 201)
+        && !skip
+        && let Some(hex) = body_etag(response)
     {
-        // A page of cached fragments hashes its parts' digests rather than the whole body.
-        let hex = match &response.page_parts {
-            Some(parts) => parts.etag(bytes),
-            None => hex::encode(Sha256::digest(bytes)),
-        };
         response.headers.insert(header::ETAG, HeaderValue::from_str(&format!("W/\"{}\"", &hex[..32])).unwrap());
         digested = true;
     }
     if !response.headers.contains_key(header::CACHE_CONTROL) {
         let value = if digested { "max-age=0, private, must-revalidate" } else { "no-cache" };
         response.headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
+    }
+}
+
+/// The hex of `Rack::ETag`'s digest of a non-empty body. A page of cached fragments hashes its
+/// parts' digests rather than the whole body; another body keeps its SHA-256 for the gzip cache.
+fn body_etag(response: &mut Response) -> Option<String> {
+    match &response.body {
+        Body::Parts(parts) => Some(parts.etag()),
+        Body::Bytes(bytes) if !bytes.is_empty() => {
+            let digest = BodyDigest(Sha256::digest(bytes).into());
+            response.body_digest = Some(digest);
+            Some(hex::encode(digest.0))
+        }
+        _ => None,
     }
 }
 

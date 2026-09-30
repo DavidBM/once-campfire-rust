@@ -2,43 +2,50 @@
 
 mod messages_support;
 
-use std::sync::Arc;
-
 use askama::Template;
-use campfire_views::layouts::{Page, render_page};
-use campfire_views::messages::MessageItem;
 use campfire_views::rooms::{self, ClosedFormView, DirectEditView, InvolvementView, OpenFormView, RefreshView, ShowView};
 use messages_support::golden;
 
 fn show(name: &str) {
     let g = golden(name);
     let show: ShowView = g.input();
-    g.assert_dom(&g.render(|ctx| {
-        let page = rooms::Show { ctx, show: &show };
-        let html = render_page(&page).unwrap();
-        assert_eq!(html, page.render().unwrap(), "the same page, however the buffer starts");
-        html
-    }));
+    g.assert_dom(&g.render(|ctx| rooms::Show { ctx, show: &show }.render().unwrap()));
 }
 
+/// A room page as it's served, recorded, is what a plain render gives, and each of its messages is
+/// a fragment the kit gets as it is: rendered into the fragment cache first, then read from it.
 #[test]
-fn a_room_of_cached_messages_renders_into_a_buffer_it_fits() {
+fn show_recorded_keeps_every_message_as_a_fragment() {
+    use campfire_views::fragment_cache::{self, FragmentCache};
+    use campfire_views::layouts;
+
     let g = golden("rooms_show_member");
-    let mut show: ShowView = g.input();
-    show.messages = (0..40)
-        .map(|n| MessageItem::Fragment {
-            client_message_id: n.to_string(),
-            room_id: show.room.id,
-            html: Arc::new(format!("<div id=\"message_{n}\">{}</div>\n", "x".repeat(9_000 + n * 50))),
-        })
-        .collect();
-    g.render(|ctx| {
-        let page = rooms::Show { ctx, show: &show };
-        let html = render_page(&page).unwrap();
-        assert_eq!(html, page.render().unwrap());
-        assert_eq!(html.capacity(), rooms::Show::SIZE_HINT + page.extra_capacity(), "never regrown");
-        html
-    });
+    let show: ShowView = g.input();
+    assert!(!show.messages.is_empty());
+    let cache = FragmentCache::new(fragment_cache::DEFAULT_MAX_BYTES);
+    for round in ["cold", "warm"] {
+        g.render(|ctx| {
+            fragment_cache::with(&cache, || {
+                let page = || rooms::Show { ctx, show: &show };
+                let recorded = campfire_views::render_sized!(page()).unwrap();
+                let plain = page().render().unwrap();
+                assert_eq!(recorded.to_string(), plain, "{round}");
+                assert_eq!(recorded.fragments().len(), show.messages.len(), "{round}");
+
+                let framed = layouts::frame(ctx, page().as_head(), page().as_content()).unwrap();
+                let plain_frame = layouts::FrameLayout {
+                    ctx,
+                    head: askama::filters::Safe(page().as_head().render().unwrap()),
+                    content: askama::filters::Safe(page().as_content().render().unwrap().into()),
+                }
+                .render()
+                .unwrap();
+                assert_eq!(framed.to_string(), plain_frame, "{round}");
+                assert_eq!(framed.fragments().len(), show.messages.len(), "{round}");
+                plain
+            })
+        });
+    }
 }
 
 #[test]

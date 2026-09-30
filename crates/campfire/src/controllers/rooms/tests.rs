@@ -289,3 +289,55 @@ async fn a_room_page_has_the_same_etag_cold_and_warm() {
     assert!(etag(&cold).is_some());
     assert_eq!(etag(&cold), etag(&warm));
 }
+
+/// A page of messages goes out in parts that are never joined: as they are to a client without
+/// gzip, gzipped from their stored pieces, and as just its length for HEAD. It's the same page with
+/// the same ETag every way (a room page, its Turbo-Frame version, and a page of older messages).
+#[tokio::test]
+async fn pages_of_messages_go_out_in_parts() {
+    let Some(app) = TestApp::boot().await else { return };
+    let mut david = app.david();
+    let mut messages = app.db().read(|conn| campfire_db::Message::for_room(conn, ALL_TALK)).await.unwrap();
+    messages.sort_by_key(|m| (m.created_at, m.id));
+    let pages = [
+        (format!("/rooms/{ALL_TALK}"), None),
+        (format!("/rooms/{ALL_TALK}"), Some("messages")),
+        (format!("/rooms/{ALL_TALK}/messages?before={}", messages[60].id), None),
+    ];
+    for (path, frame) in &pages {
+        let send = |method: Method, gzip: bool| {
+            let mut request = Req::new(method, path);
+            if gzip {
+                request = request.header("accept-encoding", "gzip");
+            }
+            if let Some(frame) = frame {
+                request = request.header("turbo-frame", frame);
+            }
+            request
+        };
+        let plain = david.send(send(Method::GET, false)).await;
+        assert_eq!(plain.status, StatusCode::OK, "{path}");
+        assert_eq!(plain.text().matches(r#"data-controller="reply""#).count(), 40, "{path}");
+        assert!(plain.frames > 40, "{path}: {} frames, one per part", plain.frames);
+        assert_eq!(plain.header("content-length"), Some(plain.body.len().to_string().as_str()), "{path}");
+
+        let gzipped = david.send(send(Method::GET, true)).await;
+        assert_eq!(gzipped.header("content-encoding"), Some("gzip"), "{path}");
+        assert_eq!(gzipped.header("content-length"), None, "{path}");
+        let mut decoded = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gzipped.body[..]), &mut decoded).unwrap();
+        assert!(decoded == plain.body, "{path}: gzip decodes to the plain page");
+
+        for gzip in [false, true] {
+            let head = david.send(send(Method::HEAD, gzip)).await;
+            assert_eq!(head.status, StatusCode::OK, "{path}");
+            assert_eq!(head.header("etag"), plain.header("etag"), "{path}");
+            if !gzip {
+                assert!(head.body.is_empty(), "{path}");
+                assert_eq!(head.header("content-length"), plain.header("content-length"), "{path}");
+            }
+        }
+        assert!(plain.header("etag").is_some_and(|etag| etag.starts_with("W/")), "{path}");
+        assert_eq!(gzipped.header("etag"), plain.header("etag"), "{path}");
+    }
+}

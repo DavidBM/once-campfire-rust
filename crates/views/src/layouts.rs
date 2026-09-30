@@ -7,6 +7,7 @@
 use askama::Template;
 
 use crate::helpers as h;
+use crate::recorded::{self, RecordedPage};
 
 /// The instance variables a page template hands to the application layout.
 pub trait Page {
@@ -19,34 +20,6 @@ pub trait Page {
     fn body_class(&self) -> Option<&str> {
         None
     }
-
-    /// What the page renders beyond its template's own text, when that's a lot: see
-    /// [`render_page`].
-    fn extra_capacity(&self) -> usize {
-        0
-    }
-}
-
-/// Renders `page` into a buffer with room for [`Page::extra_capacity`] more than its template's
-/// own text (askama's `SIZE_HINT`, where `render` starts).
-pub fn render_page<T: Template + Page>(page: &T) -> askama::Result<String> {
-    render_with_capacity(page, page.extra_capacity())
-}
-
-/// Renders `template` into a buffer with room for `extra` more bytes than its own text. A page of
-/// cached messages is ~400 KB; grown from the template's text, it would be copied into a buffer
-/// twice the size each time one fills up.
-pub fn render_with_capacity<T: Template>(template: &T, extra: usize) -> askama::Result<String> {
-    let mut html = String::with_capacity(T::SIZE_HINT + extra);
-    template.render_into(&mut html)?;
-    Ok(html)
-}
-
-/// [`Page::extra_capacity`] for a page of messages: the messages, the layout's asset tags and
-/// custom styles, and a margin for everything else the page interpolates (the parity seed's room
-/// page has ~5 KB of that). Too much costs only memory: `Bytes` takes the `String` as it is.
-pub fn messages_page_capacity(ctx: &crate::ViewContext, messages: &[crate::messages::MessageItem]) -> usize {
-    crate::messages::MessageItem::html_len(messages) + ctx.layout_len() + 16 * 1024
 }
 
 /// The application layout around page parts rendered elsewhere, for templates that don't extend
@@ -103,11 +76,13 @@ pub struct FrameLayout<'a> {
     /// The page's `:head` content.
     pub head: h::Html,
     /// The page itself.
-    pub content: h::Html,
+    pub content: h::Safe<RecordedPage>,
 }
 
-/// Renders a page's `head` and `content` blocks in the Turbo-Frame layout:
-/// `frame(ctx, page.as_head(), page.as_content())`.
-pub fn frame(ctx: &crate::ViewContext, head: impl Template, content: impl Template) -> askama::Result<String> {
-    FrameLayout { ctx, head: h::raw(head.render()?), content: h::raw(content.render()?) }.render()
+/// Renders a page's `head` and `content` blocks in the Turbo-Frame layout, recorded (the content's
+/// cached fragments too): `frame(ctx, page.as_head(), page.as_content())`.
+pub fn frame<C: Template>(ctx: &crate::ViewContext, head: impl Template, content: C) -> askama::Result<RecordedPage> {
+    let content = recorded::render(&content, C::SIZE_HINT)?;
+    let layout = FrameLayout { ctx, head: h::raw(head.render()?), content: h::raw(content) };
+    recorded::render(&layout, FrameLayout::SIZE_HINT + layout.content.0.text().len())
 }

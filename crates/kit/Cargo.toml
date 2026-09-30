@@ -34,7 +34,6 @@ hyper-util = { workspace = true, features = ["server", "server-auto", "http1", "
 flate2.workspace = true
 crc32fast.workspace = true
 foldhash.workspace = true
-memchr.workspace = true
 indexmap.workspace = true
 bytes.workspace = true
 regex.workspace = true

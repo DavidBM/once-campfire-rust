@@ -155,13 +155,20 @@ fn split<T: Default>(result: Result<T>) -> (T, Option<Error>) {
 /// Hand a finished response to hyper, streaming files and dropping HEAD bodies (`Rack::Head`)
 /// while keeping their `Content-Length`.
 pub async fn into_axum(response: Response, head: bool) -> axum::response::Response {
-    let Response { status, mut headers, body, page_parts, .. } = response;
+    let Response { status, mut headers, body, body_digest } = response;
     let app_set_length = headers.contains_key(header::CONTENT_LENGTH);
+    let mut page_parts = None;
     let body = match body {
         Body::Empty => AxumBody::empty(),
         Body::Bytes(bytes) => {
             headers.insert(header::CONTENT_LENGTH, HeaderValue::from(bytes.len()));
             AxumBody::from(bytes)
+        }
+        Body::Parts(parts) => {
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(parts.body_len()));
+            let body = AxumBody::new(parts.plain_body());
+            page_parts = Some(parts);
+            body
         }
         Body::Stream(stream) => stream,
         Body::File(file) => {
@@ -190,6 +197,9 @@ pub async fn into_axum(response: Response, head: bool) -> axum::response::Respon
     }
     if let Some(parts) = page_parts {
         response.extensions_mut().insert(parts);
+    }
+    if let Some(digest) = body_digest.filter(|_| !head) {
+        response.extensions_mut().insert(digest);
     }
     response
 }
