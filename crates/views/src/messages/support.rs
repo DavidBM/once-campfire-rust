@@ -78,23 +78,47 @@ pub fn ruby_float(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
     }
-    if !fixed_form(value.abs()) {
-        // Rust: "1.5e16", Ruby: "1.5e+16"; Rust: "1e16", Ruby: "1.0e+16".
-        let formatted = format!("{value:e}");
-        let (mantissa, exponent) = formatted.split_once('e').unwrap();
-        let mantissa = if mantissa.contains('.') { mantissa.to_string() } else { format!("{mantissa}.0") };
-        let exponent: i32 = exponent.parse().unwrap();
-        let sign = if exponent < 0 { '-' } else { '+' };
-        return format!("{mantissa}e{sign}{:02}", exponent.abs());
+    if value == 0.0 {
+        return if value.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
     }
-    let formatted = format!("{value}");
-    if formatted.contains('.') { formatted } else { format!("{formatted}.0") }
+    let (digits, decpt) = shortest_digits(value.abs());
+    let sign = if value < 0.0 { "-" } else { "" };
+    if decpt < -3 || (decpt > 15 && digits.len() as i32 <= decpt) {
+        let (first, rest) = digits.split_at(1);
+        let rest = if rest.is_empty() { "0" } else { rest };
+        let e = decpt - 1;
+        format!("{sign}{first}.{rest}e{}{:02}", if e < 0 { '-' } else { '+' }, e.abs())
+    } else if decpt <= 0 {
+        format!("{sign}0.{}{}", "0".repeat((-decpt) as usize), digits)
+    } else if decpt as usize >= digits.len() {
+        format!("{sign}{}{}.0", digits, "0".repeat(decpt as usize - digits.len()))
+    } else {
+        let (int, frac) = digits.split_at(decpt as usize);
+        format!("{sign}{int}.{frac}")
+    }
 }
 
-/// Below 2^53 every whole number is exact, so from 1e15 a fraction is exactly when the shortest
-/// digits reach past the decimal point.
-fn fixed_form(magnitude: f64) -> bool {
-    magnitude == 0.0 || (1e-4..1e15).contains(&magnitude) || ((1e15..1e16).contains(&magnitude) && magnitude.fract() != 0.0)
+/// The shortest digits that read back as `magnitude`, and where the decimal point goes in them.
+/// When two such forms are equally close, Ruby's dtoa takes the even one and Rust the upper one:
+/// `667020902720176.25.to_s` is "667020902720176.2". Those ties take 16 or 17 digits, and Rust's
+/// fixed-precision formatting breaks them to even.
+fn shortest_digits(magnitude: f64) -> (String, i32) {
+    let shortest = scientific_digits(&format!("{magnitude:e}"));
+    let (digits, _) = &shortest;
+    if digits.len() >= 16 && digits.ends_with(['1', '3', '5', '7', '9']) {
+        let even = format!("{:.*e}", digits.len() - 1, magnitude);
+        if even.parse::<f64>() == Ok(magnitude) {
+            return scientific_digits(&even);
+        }
+    }
+    shortest
+}
+
+/// The digits of `1.2345e6` and where the decimal point goes in them (7).
+fn scientific_digits(formatted: &str) -> (String, i32) {
+    let (mantissa, exponent) = formatted.split_once('e').unwrap();
+    let digits = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    (digits, exponent.parse::<i32>().unwrap() + 1)
 }
 
 #[cfg(test)]
@@ -139,6 +163,28 @@ mod tests {
             (1e16, "1.0e+16"),
             (1e20, "1.0e+20"),
             (f64::MAX, "1.7976931348623157e+308"),
+        ] {
+            assert_eq!(ruby_float(f), s, "{f:e}");
+        }
+    }
+
+    #[test]
+    fn float_to_s_breaks_ties_to_even_like_ruby() {
+        // `Float#to_s` in the reference: of two shortest forms equally close, the even one, as long
+        // as it reads back. Doubles are twice as dense just below 2^-24, so its even form
+        // (5.960464477539062e-08) reads back as a different double.
+        for (f, s) in [
+            (667020902720176.0 + 0.25, "667020902720176.2"),
+            (667020902720176.0 + 0.75, "667020902720176.8"),
+            (1000000000000000.2, "1000000000000000.2"),
+            (1125899906842624.0 + 0.25, "1125899906842624.2"),
+            (-(2074704973491874.0 + 0.25), "-2074704973491874.2"),
+            (24603114260468.0 + 0.0625, "24603114260468.062"),
+            (210745403561986.0 + 0.125, "210745403561986.12"),
+            (2f64.powi(-24), "5.960464477539063e-08"),
+            (2f64.powi(-25), "2.9802322387695312e-08"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1.0 / 3.0, "0.3333333333333333"),
         ] {
             assert_eq!(ruby_float(f), s, "{f:e}");
         }
