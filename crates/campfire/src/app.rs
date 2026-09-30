@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::middleware::Next;
-use campfire_db::Database;
+use campfire_db::{Connection, Database, Tx};
 use campfire_kit::exceptions::ErrorPages;
 use campfire_kit::{Ctx, Kit, KitConfig, RailsCrypto, SharedClock, SharedCrypto};
 use campfire_storage::{DiskService, Storage};
@@ -49,6 +49,36 @@ impl AppState {
     /// don't subscribe to notifications that would never be sent.
     pub fn vapid_public_key(&self) -> Option<String> {
         self.web_push.as_ref().and(self.config.vapid_public_key.clone())
+    }
+
+    /// `db.read` for actions, whose errors become responses as [`db_error`] maps them. (Jobs and
+    /// channels use `db.read`, for a `campfire_db::Result`.)
+    pub async fn read<T, F>(&self, f: F) -> campfire_kit::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Connection) -> campfire_db::Result<T> + Send + 'static,
+    {
+        self.db.read(f).await.map_err(db_error)
+    }
+
+    /// `db.write` for actions, whose errors become responses as [`db_error`] maps them.
+    pub async fn write<T, F>(&self, f: F) -> campfire_kit::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Tx<'_>) -> campfire_db::Result<T> + Send + 'static,
+    {
+        self.db.write(f).await.map_err(db_error)
+    }
+}
+
+/// A database error raised in an action, as Active Record's `rescue_responses` answer it
+/// (activerecord/lib/active_record/railtie.rb): `RecordNotFound` is a 404, `RecordInvalid` a 422,
+/// and anything else a 500.
+pub fn db_error(error: campfire_db::Error) -> campfire_kit::Error {
+    match error {
+        campfire_db::Error::RecordNotFound(_) => campfire_kit::Error::NotFound,
+        campfire_db::Error::RecordInvalid(_) => campfire_kit::Error::Status(campfire_kit::StatusCode::UNPROCESSABLE_ENTITY),
+        other => campfire_kit::Error::internal(other),
     }
 }
 

@@ -17,7 +17,7 @@ use crate::controllers::presenters::view_context::Layout;
 pub async fn index(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     c.respond_to(&[&format::TURBO_STREAM])?;
-    let users = c.app().db.read(User::active_ordered_without_bots).await.map_err(Error::internal)?;
+    let users = c.app().read(User::active_ordered_without_bots).await?;
     let page = Page::new(c.param_str("page"), users.len() as i64, &[500]);
     let secrets = c.app().secrets.clone();
     let users: Vec<_> = page.records(&users).iter().map(|user| presenters::user_summary(&secrets, user)).collect();
@@ -38,11 +38,7 @@ pub async fn update(c: &mut Ctx) -> Result {
         Some("administrator") => Role::Administrator,
         _ => Role::Member,
     };
-    c.app()
-        .db
-        .write(move |tx| user.update(tx, UserChanges { role: Some(role), ..UserChanges::default() }))
-        .await
-        .map_err(Error::internal)?;
+    c.app().write(move |tx| user.update(tx, UserChanges { role: Some(role), ..UserChanges::default() })).await?;
     redirect_to_edit_account(c)
 }
 
@@ -51,23 +47,14 @@ pub async fn destroy(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     concerns::ensure_can_administer(c)?;
     let mut user = set_user(c).await?;
-    c.app().db.write(move |tx| user.deactivate(tx)).await.map_err(Error::internal)?;
+    c.app().write(move |tx| user.deactivate(tx)).await?;
     redirect_to_edit_account(c)
 }
 
 /// `User.active.find(params[:user_id] || params[:id])`
 async fn set_user(c: &Ctx) -> Result<User> {
     let id = c.param_str("user_id").or_else(|| c.param_str("id")).and_then(cast_integer).ok_or(Error::NotFound)?;
-    c.app()
-        .db
-        .read(move |conn| match User::find_active(conn, id) {
-            Ok(user) => Ok(Some(user)),
-            Err(campfire_db::Error::RecordNotFound(_)) => Ok(None),
-            Err(error) => Err(error),
-        })
-        .await
-        .map_err(Error::internal)?
-        .ok_or(Error::NotFound)
+    c.app().read(move |conn| User::find_active(conn, id)).await
 }
 
 fn redirect_to_edit_account(c: &mut Ctx) -> Result {

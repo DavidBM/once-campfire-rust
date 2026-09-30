@@ -58,7 +58,7 @@ pub async fn create(c: &mut Ctx) -> Result {
 
 /// `redirect_to root_url if Account.any?`
 async fn prevent_repeats(c: &mut Ctx) -> Result<()> {
-    let any = c.app().db.read(|conn| Ok(Account::count(conn)? > 0)).await.map_err(Error::internal)?;
+    let any = c.app().read(|conn| Ok(Account::count(conn)? > 0)).await?;
     if any {
         let root = c.url_for(&campfire_routes::root());
         return halt(c.redirect_to(&root)?);

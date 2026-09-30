@@ -22,7 +22,7 @@ pub async fn index(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     c.respond_to(&[&format::HTML])?;
     let user_id = concerns::require_current_user(c)?.id;
-    let subscriptions = c.app().db.read(move |conn| PushSubscription::for_user(conn, user_id)).await.map_err(Error::internal)?;
+    let subscriptions = c.app().read(move |conn| PushSubscription::for_user(conn, user_id)).await?;
     let push_subscriptions: Vec<_> = subscriptions.iter().map(presenters::accounts::push_subscription).collect();
     framed_page!(c, StatusCode::OK, |ctx| users::PushSubscriptionsIndex { ctx, push_subscriptions: push_subscriptions.clone() }).await
 }
@@ -35,18 +35,14 @@ pub async fn create(c: &mut Ctx) -> Result {
 
     let existing = {
         let params = params.clone();
-        c.app().db.read(move |conn| find_by(conn, user_id, &params)).await.map_err(Error::internal)?
+        c.app().read(move |conn| find_by(conn, user_id, &params)).await?
     };
     match existing {
         // Existing endpoints must pass current validations
         Some(subscription) => {
             if validate(&subscription).await.is_empty() {
                 let id = subscription.id;
-                c.app()
-                    .db
-                    .write(move |tx| presenters::accounts::touch(tx.conn(), "push_subscriptions", id, tx.now()))
-                    .await
-                    .map_err(Error::internal)?;
+                c.app().write(move |tx| presenters::accounts::touch(tx.conn(), "push_subscriptions", id, tx.now())).await?;
                 Ok(c.head(StatusCode::OK))
             } else {
                 Ok(c.head(StatusCode::UNPROCESSABLE_ENTITY))
@@ -82,14 +78,12 @@ pub async fn destroy(c: &mut Ctx) -> Result {
     let user_id = concerns::require_current_user(c)?.id;
     if let Some(id) = c.param_str("id").and_then(cast_integer) {
         c.app()
-            .db
             .write(move |tx| match PushSubscription::find(tx.conn(), id) {
                 Ok(subscription) if subscription.user_id == user_id => subscription.destroy(tx),
                 Ok(_) | Err(campfire_db::Error::RecordNotFound(_)) => Ok(()),
                 Err(error) => Err(error),
             })
-            .await
-            .map_err(Error::internal)?;
+            .await?;
     }
     let location = c.url_for(&campfire_routes::user_push_subscriptions());
     c.redirect_to(&location)

@@ -10,7 +10,7 @@ use campfire_views::rooms::{DirectEditView, DirectsEdit, DirectsNew};
 use super::{Scope, destroy_room, existing_user_ids, redirect_to_room, set_room, user_ids_param};
 use crate::app::AppCtx;
 use crate::concerns::{Before, before_actions, require_current_user};
-use crate::controllers::presenters::page::{self, Rendered, db_error};
+use crate::controllers::presenters::page::{self, Rendered};
 use crate::controllers::presenters::{Presenter, user_view};
 
 /// `show`: the room page, which checks membership. Rails inherits RoomsController#show without
@@ -34,13 +34,11 @@ pub async fn create(c: &mut Ctx) -> Result {
     ids.push(user_id);
     let room = c
         .app()
-        .db
         .write(move |tx| {
             let users = existing_user_ids(tx.conn(), &ids)?;
             Room::find_or_create_direct_for(tx, &users, user_id)
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     broadcast_create_room(c, &room).await?;
     redirect_to_room(c, room.id)
 }
@@ -52,7 +50,6 @@ pub async fn edit(c: &mut Ctx) -> Result {
     let app = c.app().clone();
     let edit = c
         .app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             // `@room.users.many? ? @room.users.without(Current.user) : @room.users`
@@ -65,8 +62,7 @@ pub async fn edit(c: &mut Ctx) -> Result {
                 users: users.iter().map(|user| user_view(&app.secrets, user)).collect(),
             })
         })
-        .await
-        .map_err(db_error)?;
+        .await?;
     page::framed_page!(c, StatusCode::OK, |ctx| DirectsEdit { ctx, edit: &edit }).await
 }
 
@@ -82,7 +78,6 @@ async fn broadcast_create_room(c: &Ctx, room: &Room) -> Result<()> {
     let (app, room) = (c.app().clone(), room.clone());
     let base_url = page::renderer_base_url(c);
     c.app()
-        .db
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let account = Account::first(conn)?;
@@ -96,5 +91,4 @@ async fn broadcast_create_room(c: &Ctx, room: &Room) -> Result<()> {
             app.broadcasts.direct_room_create(conn, &room, &partials)
         })
         .await
-        .map_err(db_error)
 }

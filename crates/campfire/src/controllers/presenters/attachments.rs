@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use campfire_db::{CachedStatements, Connection, Event, Tx};
-use campfire_kit::{Error, Param, Result, UploadedFile};
+use campfire_kit::{Param, Result, UploadedFile};
 use campfire_storage::{Blob, Filename, Staged, Variation};
 use rusqlite::OptionalExtension;
 
@@ -196,7 +196,7 @@ fn table_for(record_type: &str) -> Option<&'static str> {
 /// blob, or `None` when there's no attachment or it can't be transformed.
 pub async fn processed_variant(app: &App, record: Record, name: &str, transformations: Variation) -> Result<Option<Blob>> {
     let name = name.to_string();
-    let blob = app.db.read(move |conn| attached_blob(conn, record.record_type, record.id, &name)).await.map_err(Error::internal)?;
+    let blob = app.read(move |conn| attached_blob(conn, record.record_type, record.id, &name)).await?;
     let Some(blob) = blob.filter(Blob::is_variable) else { return Ok(None) };
     crate::active_storage::processed_representation(app, blob, transformations).await.map(Some)
 }

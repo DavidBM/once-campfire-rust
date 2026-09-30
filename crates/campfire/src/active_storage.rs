@@ -87,7 +87,7 @@ async fn set_blob(c: &mut Ctx) -> Result<Blob> {
     let Some(blob_id) = paths::verify_signed_blob_id(&*storage.verifier, &signed_id, c.now()) else {
         return halt(head(StatusCode::NOT_FOUND));
     };
-    c.app().db.read(move |conn| Blob::find(conn, blob_id).map_err(storage_error)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
+    c.app().read(move |conn| Blob::find(conn, blob_id).map_err(storage_error)).await?.ok_or(Error::NotFound)
 }
 
 /// `set_representation`: `@blob.representation(params[:variation_key]).processed`. A bad
@@ -141,8 +141,8 @@ pub(crate) async fn processed_variant_with(
 ) -> Result<Blob> {
     let storage = app.storage.clone();
     let (source, digested) = (blob.clone(), variation.clone());
-    let existing = app.db.read(move |conn| storage.existing_variant(conn, &source, &digested).map_err(storage_error)).await;
-    if let Some(image) = existing.map_err(Error::internal)? {
+    let existing = app.read(move |conn| storage.existing_variant(conn, &source, &digested).map_err(storage_error)).await?;
+    if let Some(image) = existing {
         return Ok(image);
     }
 
@@ -151,31 +151,29 @@ pub(crate) async fn processed_variant_with(
     let image = process_media(move || transform(&storage, &source, &digested)).await?;
 
     let storage = app.storage.clone();
-    app.db
-        .write(move |tx| {
-            let conn = tx.conn();
-            match storage.record_variant(conn, &blob, &variation, &image, tx.now().jiff()).map_err(storage_error)? {
-                Some(recorded) => {
-                    keep_after_commit(tx, image);
-                    Ok(recorded)
-                }
-                // Another request recorded it first; ours is dropped (and its file deleted).
-                None => storage
-                    .existing_variant(conn, &blob, &variation)
-                    .map_err(storage_error)?
-                    .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::VariantRecord")),
+    app.write(move |tx| {
+        let conn = tx.conn();
+        match storage.record_variant(conn, &blob, &variation, &image, tx.now().jiff()).map_err(storage_error)? {
+            Some(recorded) => {
+                keep_after_commit(tx, image);
+                Ok(recorded)
             }
-        })
-        .await
-        .map_err(Error::internal)
+            // Another request recorded it first; ours is dropped (and its file deleted).
+            None => storage
+                .existing_variant(conn, &blob, &variation)
+                .map_err(storage_error)?
+                .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::VariantRecord")),
+        }
+    })
+    .await
 }
 
 /// `blob.preview_image`, drawing it with ffmpeg off the writer when it's missing.
 async fn preview_image(app: &App, blob: Blob) -> Result<Blob> {
     let storage = app.storage.clone();
     let source = blob.clone();
-    let existing = app.db.read(move |conn| storage.existing_preview_image(conn, &source).map_err(storage_error)).await;
-    if let Some(image) = existing.map_err(Error::internal)? {
+    let existing = app.read(move |conn| storage.existing_preview_image(conn, &source).map_err(storage_error)).await?;
+    if let Some(image) = existing {
         return Ok(image);
     }
 
@@ -184,22 +182,20 @@ async fn preview_image(app: &App, blob: Blob) -> Result<Blob> {
     let image = process_media(move || storage.draw_preview_image(&source)).await?;
 
     let storage = app.storage.clone();
-    app.db
-        .write(move |tx| {
-            let conn = tx.conn();
-            match storage.record_preview_image(conn, &blob, &image, tx.now().jiff()).map_err(storage_error)? {
-                Some(recorded) => {
-                    keep_after_commit(tx, image);
-                    Ok(recorded)
-                }
-                None => storage
-                    .existing_preview_image(conn, &blob)
-                    .map_err(storage_error)?
-                    .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::Blob")),
+    app.write(move |tx| {
+        let conn = tx.conn();
+        match storage.record_preview_image(conn, &blob, &image, tx.now().jiff()).map_err(storage_error)? {
+            Some(recorded) => {
+                keep_after_commit(tx, image);
+                Ok(recorded)
             }
-        })
-        .await
-        .map_err(Error::internal)
+            None => storage
+                .existing_preview_image(conn, &blob)
+                .map_err(storage_error)?
+                .ok_or(campfire_db::Error::RecordNotFound("ActiveStorage::Blob")),
+        }
+    })
+    .await
 }
 
 /// What `blob.analyze` would save, worked out off the writer.
@@ -499,7 +495,7 @@ pub async fn direct_uploads_create(c: &mut Ctx) -> Result {
         byte_size,
         checksum: checksum.clone(),
     };
-    let blob = c.app().db.write(move |tx| new_blob.insert(tx.conn(), now).map_err(storage_error)).await.map_err(Error::internal)?;
+    let blob = c.app().write(move |tx| new_blob.insert(tx.conn(), now).map_err(storage_error)).await?;
 
     let expires_at = now + jiff::SignedDuration::from_secs(SERVICE_URLS_EXPIRE_IN);
     let url = c.url_for(&storage.service.url_path_for_direct_upload(

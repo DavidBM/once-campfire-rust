@@ -23,7 +23,7 @@ pub async fn new(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default().require_unauthenticated_access()).await?;
     let account = verify_join_code(c).await?;
     c.respond_to(&[&format::HTML])?;
-    let help_contact = c.app().db.read(presenters::accounts::help_contact).await.map_err(Error::internal)?;
+    let help_contact = c.app().read(presenters::accounts::help_contact).await?;
     let join_code = account.join_code;
     framed_page!(c, StatusCode::OK, |ctx| users::New { ctx, join_code: join_code.clone(), help_contact: help_contact.clone() }).await
 }
@@ -105,17 +105,15 @@ fn show_page<'a>(ctx: &'a campfire_views::ViewContext<'a>, user: &users::UserSum
 /// `User.find(params[key])`: 404 when there's no such user.
 pub async fn find_user(c: &Ctx, key: &str) -> Result<User> {
     let id = c.param_str(key).and_then(cast_integer).ok_or(Error::NotFound)?;
-    c.app().db.read(move |conn| User::find_by_id(conn, id)).await.map_err(Error::internal)?.ok_or(Error::NotFound)
+    c.app().read(move |conn| User::find_by_id(conn, id)).await?.ok_or(Error::NotFound)
 }
 
 /// `head :not_found if Current.account.join_code != params[:join_code]`
 async fn verify_join_code(c: &mut Ctx) -> Result<Account> {
     let account = c
         .app()
-        .db
         .read(Account::first)
-        .await
-        .map_err(Error::internal)?
+        .await?
         // `Current.account.join_code` on nil raises NoMethodError.
         .ok_or_else(|| Error::internal(anyhow::anyhow!("undefined method 'join_code' for nil")))?;
     if c.param_str("join_code") != Some(account.join_code.as_str()) {
