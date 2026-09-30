@@ -12,10 +12,11 @@
 //! messages share and make a room page ~4× larger; chained like this it's within 1% of compressing
 //! the page whole.
 //!
-//! Fragments are known by identity (the `Arc` the fragment cache hands out), text by its SHA-256,
-//! which is remembered by the text's bytes so that a page's layout isn't hashed on every request.
-//! A stored piece that depends on a fragment holds a `Weak` to it, so while the piece exists that
-//! address can't come back as a different fragment.
+//! A stored piece is found by its part (a text by its SHA-256, a fragment by the `Arc` the fragment
+//! cache hands out) and by the SHA-256 of the part before it: those bytes are all it depends on
+//! besides its own, so it's valid after any part with the same ones. The digests are remembered,
+//! so pages don't hash their parts on every request: a fragment's with its `Arc`, a text's by the
+//! text's bytes.
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -81,11 +82,12 @@ enum Part {
     },
 }
 
-/// What comes right before a part, which its piece may refer back into.
+/// What comes right before a part, which its piece may refer back into: the SHA-256 of exactly
+/// the bytes it may use (see [`Part::as_before`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Before {
     Nothing,
-    Fragment(usize),
+    Fragment(Sha),
     Text(Sha),
 }
 
@@ -101,9 +103,7 @@ impl Part {
     fn as_before<'a>(&self, body: &'a [u8]) -> (Before, &'a [u8]) {
         match self {
             Part::Text { range, sha } => (Before::Text(*sha), &body[range.clone()]),
-            Part::Fragment { fragment, range, .. } => {
-                (Before::Fragment(fragment_key(fragment)), &body[range.end - fragment.len()..range.end])
-            }
+            Part::Fragment { fragment, sha, range, .. } => (Before::Fragment(*sha), &body[range.end - fragment.len()..range.end]),
         }
     }
 }
@@ -204,7 +204,7 @@ impl PageParts {
                 .iter()
                 .zip(&befores)
                 .map(|(part, (before, _))| match part {
-                    Part::Text { sha, .. } => texts.get(&(*sha, *before), |piece| piece.deflated.clone()),
+                    Part::Text { sha, .. } => texts.get(&(*sha, *before), Bytes::clone),
                     Part::Fragment { fragment, glue, range, .. } => {
                         let glue = &body[range.start..range.start + glue];
                         fragments.get(&fragment_key(fragment)).and_then(|known| known.piece_after(*before, glue))
@@ -215,27 +215,18 @@ impl PageParts {
         let mut pieces = Vec::with_capacity(self.parts.len());
         let mut new_texts = Vec::new();
         let mut new_fragments = Vec::new();
-        for (index, ((part, (before, dictionary)), stored)) in self.parts.iter().zip(&befores).zip(stored).enumerate() {
+        for ((part, (before, dictionary)), stored) in self.parts.iter().zip(&befores).zip(stored) {
             if let Some(piece) = stored {
                 pieces.push(piece);
                 continue;
             }
             let deflated = compress(dictionary, &body[part.range().clone()]);
-            let pin = match index.checked_sub(1).map(|previous| &self.parts[previous]) {
-                Some(Part::Fragment { fragment, .. }) => Some(Arc::downgrade(fragment)),
-                _ => None,
-            };
             match part {
                 Part::Text { .. } if deflated.len() > MAX_STORED_TEXT_PIECE => {}
-                Part::Text { sha, .. } => new_texts.push(((*sha, *before), TextPiece { deflated: deflated.clone(), _pin: pin })),
+                Part::Text { sha, .. } => new_texts.push(((*sha, *before), deflated.clone())),
                 Part::Fragment { fragment, glue, range, .. } => new_fragments.push((
                     fragment.clone(),
-                    FragmentPiece {
-                        before: *before,
-                        _pin: pin,
-                        glue: body[range.start..range.start + glue].into(),
-                        deflated: deflated.clone(),
-                    },
+                    FragmentPiece { before: *before, glue: body[range.start..range.start + glue].into(), deflated: deflated.clone() },
                 )),
             }
             pieces.push(deflated);
@@ -351,6 +342,7 @@ fn compress(dictionary: &[u8], text: &[u8]) -> Bytes {
 /// A fragment seen in a page: its SHA-256, and its pieces for the predecessors it's followed, most
 /// recently stored last.
 struct KnownFragment {
+    /// Keeps the fragment's address from being reused while the entry exists.
     fragment: Weak<String>,
     sha: Sha,
     pieces: Vec<Arc<FragmentPiece>>,
@@ -358,8 +350,6 @@ struct KnownFragment {
 
 struct FragmentPiece {
     before: Before,
-    /// Keeps a predecessor fragment's address from being reused while this piece refers to it.
-    _pin: Option<Weak<String>>,
     glue: Box<[u8]>,
     deflated: Bytes,
 }
@@ -377,11 +367,6 @@ impl KnownFragment {
         }
         self.pieces.push(Arc::new(piece));
     }
-}
-
-struct TextPiece {
-    deflated: Bytes,
-    _pin: Option<Weak<String>>,
 }
 
 /// A map in two generations, bounded by what its entries cost: reading an old entry promotes it,
@@ -436,8 +421,8 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> Generations<K, V, S> {
 }
 
 static FRAGMENTS: LazyLock<Mutex<HashMap<usize, KnownFragment>>> = LazyLock::new(Mutex::default);
-static TEXT_PIECES: LazyLock<Mutex<Generations<(Sha, Before), TextPiece>>> =
-    LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_PIECE_BYTES, |_, piece| piece.deflated.len() + ENTRY_OVERHEAD)));
+static TEXT_PIECES: LazyLock<Mutex<Generations<(Sha, Before), Bytes>>> =
+    LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_PIECE_BYTES, |_, piece| piece.len() + ENTRY_OVERHEAD)));
 static TEXT_SHAS: LazyLock<Mutex<Generations<Box<[u8]>, Sha>>> =
     LazyLock::new(|| Mutex::new(Generations::with_budget(MAX_TEXT_BYTES, |text, _| text.len() + ENTRY_OVERHEAD)));
 
@@ -612,6 +597,21 @@ mod tests {
         gzip(&search, &search_hits);
         let after = pieces(&messages[5]);
         assert!(before.iter().zip(&after).all(|(a, b)| Arc::ptr_eq(a, b)), "both pages reuse theirs");
+    }
+
+    #[test]
+    fn a_piece_follows_its_predecessors_bytes_not_its_arc() {
+        let messages: Vec<_> = (800..803).map(message).collect();
+        let body = page("<p>", &messages, "</p>");
+        gzip(&body, &messages);
+        let pieces = |fragment: &Arc<String>| lock(&FRAGMENTS)[&fragment_key(fragment)].pieces.clone();
+        let stored = pieces(&messages[1]);
+        // The first message rendered again into a new `Arc`, with the same bytes.
+        let rerendered = vec![Arc::new(messages[0].to_string()), messages[1].clone(), messages[2].clone()];
+        assert_eq!(gunzip(&gzip(&body, &rerendered)), body.as_bytes());
+        let after = pieces(&messages[1]);
+        assert_eq!(after.len(), 1, "no second piece for the same predecessor");
+        assert!(Arc::ptr_eq(&stored[0], &after[0]), "the piece after it is reused");
     }
 
     #[test]
