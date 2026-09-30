@@ -7,9 +7,10 @@
 //! Reads run on their own threads rather than tokio's blocking pool, where a read that found
 //! every connection busy parked a blocking thread until one came free (99–136 threads for 5
 //! readers under load, in the pool bcrypt, storage and uploads share). Here a waiting read costs
-//! a queue entry, reads start in the order they were queued, and a reader that finishes a read
-//! takes the next one without a hand-off to another thread, which is what makes it cheaper than
-//! waiting for a connection on an async semaphore (bench/results/db-hops-20260930).
+//! a queue entry, reads leave the queue in the order they were queued (with several readers, two
+//! reads taken one after the other may still start in either order), and a reader that finishes
+//! a read takes the next one without a hand-off to another thread, which is what makes it cheaper
+//! than waiting for a connection on an async semaphore (bench/results/db-hops-20260930).
 //!
 //! WAL checkpoints run on a checkpointer thread with a connection of its own, not on the writer.
 //! Rails keeps SQLite's auto-checkpoint: once a commit leaves the WAL at 1,000 pages or more,
