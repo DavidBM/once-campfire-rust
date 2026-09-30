@@ -247,7 +247,7 @@ pub fn bot_form(conn: &Connection, storage: &campfire_storage::Storage, base_url
         name: Some(bot.name.clone()),
         webhook_url: bot.webhook_url(conn)?,
         avatar_attachment_url: avatar
-            .map(|blob| format!("{base_url}{}", campfire_storage::paths::blob_redirect_path(&*storage.verifier, &blob, None))),
+            .map(|blob| format!("{base_url}{}", campfire_storage::paths::blob_redirect_path(&storage.verifier, &blob, None))),
     })
 }
 

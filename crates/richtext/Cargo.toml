@@ -12,7 +12,10 @@ workspace = true
 # The vendored 0.35: a backported parsing fix, and hooks for enforcing Gumbo's limits while parsing
 # (see vendor/html5ever/Cargo.toml and the workspace Cargo.toml).
 html5ever.workspace = true
+rails_compat.workspace = true
 serde_json.workspace = true
-base64.workspace = true
 regex.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+base64.workspace = true

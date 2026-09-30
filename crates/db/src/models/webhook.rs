@@ -82,43 +82,17 @@ impl Webhook {
         let html = message.body_html(conn)?;
         let plain = without_recipient_mentions(&message.plain_text_body(conn, rich_text)?, &recipient);
 
-        // Hash order as written in `Webhook#payload`, encoded like `ActiveSupport::JSON`.
-        let body = format!(
-            r#"{{"user":{{"id":{},"name":{}}},"room":{{"id":{},"name":{},"path":{}}},"message":{{"id":{},"body":{{"html":{},"plain":{}}},"path":{}}}}}"#,
-            creator.id,
-            json_string(&creator.name),
-            room.id,
-            room.name.as_deref().map(json_string).unwrap_or_else(|| "null".into()),
-            json_string(room_bot_messages_path),
-            message.id,
-            html.as_deref().map(json_string).unwrap_or_else(|| "null".into()),
-            json_string(&plain),
-            json_string(message_path),
-        );
-        Ok(body)
+        // Hash order as written in `Webhook#payload`.
+        let body = serde_json::json!({
+            "user": { "id": creator.id, "name": creator.name },
+            "room": { "id": room.id, "name": room.name, "path": room_bot_messages_path },
+            "message": { "id": message.id, "body": { "html": html, "plain": plain }, "path": message_path },
+        });
+        Ok(rails_compat::json::encode(&body))
     }
 }
 
 /// Removes `@Recipient` mentions and leading/trailing (Unicode) whitespace.
 fn without_recipient_mentions(body: &str, recipient: &User) -> String {
     body.replace(&recipient.attachable_plain_text_representation(), "").trim_matches(char::is_whitespace).to_string()
-}
-
-/// `ActiveSupport::JSON.encode` of a string: JSON with `<`, `>` and `&` escaped as `\uXXXX`.
-/// U+2028 and U+2029 stay raw (`load_defaults 8.2` turns `escape_js_separators_in_json` off;
-/// probed in the reference image).
-pub fn json_string(s: &str) -> String {
-    let encoded = serde_json::to_string(s).expect("strings encode");
-    encoded.replace('<', "\\u003c").replace('>', "\\u003e").replace('&', "\\u0026")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::json_string;
-
-    /// `{ a: "\u2028<>&" }.to_json` in the reference image.
-    #[test]
-    fn json_strings_escape_html_but_not_line_separators() {
-        assert_eq!(json_string("\u{2028}<>&\u{2029}"), "\"\u{2028}\\u003c\\u003e\\u0026\u{2029}\"");
-    }
 }

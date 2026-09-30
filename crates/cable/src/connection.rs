@@ -12,17 +12,18 @@ use std::sync::Arc;
 
 use futures_util::stream::{AbortRegistration, Abortable, SelectAll};
 use futures_util::{FutureExt, StreamExt};
+use rails_compat::json;
 use serde_json::Value;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::Server;
 use crate::channel::{Channel, Params, Subscription};
 use crate::protocol::{self, DisconnectReason};
 use crate::pubsub::{Deliveries, Frame, Subscriber};
 use crate::server::{ConnectRequest, Identified, internal_channel};
 use crate::socket::{Incoming, ReadError, Reader, Writer};
-use crate::{Server, json};
 
 struct Entry<U: Send + Sync + 'static> {
     channel: Box<dyn Channel<U>>,

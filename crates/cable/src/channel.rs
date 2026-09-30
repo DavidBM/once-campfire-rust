@@ -2,11 +2,12 @@
 use std::sync::Arc;
 
 use futures_util::stream::{AbortHandle, AbortRegistration};
+use rails_compat::json;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::pubsub::Subscriber;
-use crate::{Server, json, naming, protocol};
+use crate::{Server, naming, protocol};
 
 pub type Params = Map<String, Value>;
 

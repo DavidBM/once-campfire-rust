@@ -108,7 +108,7 @@ pub fn editable_value(body: &str, ctx: &RenderContext) -> Result<Option<String>,
         if dom.attr(node, "url").is_none_or(is_blank) {
             let attachment = attachables::attachment_from_node(&dom, node, ctx)?;
             let content = render_attachment_html(&attachment, ctx)?;
-            dom.set_attr(node, "content", &ruby::to_json_string(&content));
+            dom.set_attr(node, "content", &rails_compat::json::encode(&content));
         }
     }
     Ok(Some(dom.to_html(root)))

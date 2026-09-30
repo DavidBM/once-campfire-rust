@@ -9,8 +9,8 @@
 //! do both at once are for tests and tools.
 
 use std::path::Path;
-use std::sync::Arc;
 
+use rails_compat::MessageVerifier;
 use rusqlite::Connection;
 use tempfile::NamedTempFile;
 
@@ -23,12 +23,17 @@ use crate::key::checksum_file;
 use crate::marshal::Value;
 use crate::process;
 use crate::variation::Variation;
-use crate::verifier::Verifier;
 use crate::{Error, Result};
 
 pub struct Storage {
     pub service: DiskService,
-    pub verifier: Arc<dyn Verifier>,
+    /// `ActiveStorage.verifier`: `rails_compat::app_verifier(secrets, "ActiveStorage")`. It signs
+    /// blob ids (purpose "blob_id": `ActiveStorage::Blob` overrides both the signed-id verifier
+    /// and `combine_signed_id_purposes`, so this is *not* the Active Record signed-id scheme),
+    /// variation keys ("variation"), disk URLs ("blob_key") and direct-upload tokens
+    /// ("blob_token"). The data goes in and comes out as encoded JSON, because key order is part
+    /// of the signed bytes (e.g. `{key:, disposition:, content_type:, service_name:}`).
+    pub verifier: MessageVerifier,
 }
 
 /// A new blob whose file is already in the service but whose row isn't saved yet. Dropping it
@@ -66,7 +71,7 @@ impl Drop for Staged {
 }
 
 impl Storage {
-    pub fn new(service: DiskService, verifier: Arc<dyn Verifier>) -> Self {
+    pub fn new(service: DiskService, verifier: MessageVerifier) -> Self {
         Self { service, verifier }
     }
 

@@ -11,11 +11,11 @@ workspace = true
 [dependencies]
 rusqlite.workspace = true
 jiff.workspace = true
+rails_compat.workspace = true
 serde_json.workspace = true
 serde_yaml = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
-bcrypt.workspace = true
 rand.workspace = true
 uuid.workspace = true
 crc32fast = { workspace = true, optional = true }

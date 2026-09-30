@@ -411,11 +411,11 @@ name = "campfire_db"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "bcrypt",
  "campfire_db",
  "crc32fast",
  "hex",
  "jiff",
+ "rails_compat",
  "rand 0.9.5",
  "rusqlite",
  "serde_json",
@@ -480,6 +480,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "html5ever",
+ "rails_compat",
  "regex",
  "serde_json",
  "thiserror",
@@ -494,16 +495,14 @@ name = "campfire_storage"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "hmac",
  "jiff",
  "md-5",
- "pbkdf2",
+ "rails_compat",
  "rand 0.9.5",
  "rusqlite",
  "serde",
  "serde_json",
  "sha1",
- "sha2",
  "tempfile",
  "thiserror",
 ]
@@ -516,6 +515,7 @@ dependencies = [
  "campfire_routes",
  "html5ever",
  "jiff",
+ "rails_compat",
  "serde",
  "serde_json",
 ]
@@ -1916,6 +1916,7 @@ dependencies = [
  "jiff",
  "pbkdf2",
  "rand 0.9.5",
+ "serde",
  "serde_json",
  "sha1",
  "sha2",

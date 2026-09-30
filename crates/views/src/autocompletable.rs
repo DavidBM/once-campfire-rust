@@ -49,5 +49,5 @@ impl UserJson {
 /// `autocompletable/users/index.json.jbuilder`.
 pub fn users_index_json(users: &[MentionUser], base_url: &str) -> String {
     let users: Vec<UserJson> = users.iter().map(|user| UserJson::new(user, base_url)).collect();
-    h::to_rails_json(&users)
+    rails_compat::json::encode(&users)
 }

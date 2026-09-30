@@ -253,7 +253,7 @@ impl User {
             Some(user) => user.authenticate(password).then_some(user),
             None => {
                 // authenticate_by hashes anyway so a missing account takes as long as a wrong password.
-                let _ = bcrypt::verify(password, DUMMY_DIGEST);
+                rails_compat::password::verify(password, DUMMY_DIGEST);
                 None
             }
         }
@@ -512,7 +512,7 @@ impl User {
     /// `has_secure_password`'s `authenticate`.
     pub fn authenticate(&self, password: &str) -> bool {
         match self.password_digest.as_deref() {
-            Some(digest) if !digest.is_empty() => bcrypt::verify(password, digest).unwrap_or(false),
+            Some(digest) if !digest.is_empty() => rails_compat::password::verify(password, digest),
             _ => false,
         }
     }
@@ -583,7 +583,7 @@ impl PasswordDigest {
 
 /// `BCrypt::Password.create(password, cost:)`, in the `$2a$` format bcrypt-ruby writes.
 pub fn password_digest(password: &str, cost: u32) -> Result<String> {
-    bcrypt::hash_with_result(password, cost).map(|parts| parts.format_for_version(bcrypt::Version::TwoA)).map_err(crate::Error::other)
+    rails_compat::password::digest_with_cost(password, cost).map_err(crate::Error::other)
 }
 
 const DUMMY_DIGEST: &str = "$2a$12$FiKmSp4UhLvSB4Sd/ZUjQunyKP6.NjDRHdr5LnKUVk.BUn4Mq12WS";

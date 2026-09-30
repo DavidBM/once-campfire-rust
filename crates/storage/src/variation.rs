@@ -3,12 +3,12 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use rails_compat::MessageVerifier;
 use sha1::{Digest, Sha1};
 
 use crate::json::Json;
 use crate::marcel;
 use crate::marshal::{self, Value};
-use crate::verifier::Verifier;
 use crate::{Error, Result};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,12 +104,12 @@ impl Variation {
     }
 
     /// `Variation#key`: `ActiveStorage.verifier.generate(transformations, purpose: :variation)`.
-    pub fn key(&self, verifier: &dyn Verifier) -> String {
-        verifier.generate(&self.to_json().encode(), "variation", None)
+    pub fn key(&self, verifier: &MessageVerifier) -> String {
+        verifier.generate_raw(&self.to_json().encode(), Some("variation"), None)
     }
 
-    pub fn decode(verifier: &dyn Verifier, key: &str, now: jiff::Timestamp) -> Result<Variation> {
-        let data = verifier.verified(key, "variation", now).ok_or(Error::InvalidSignature)?;
+    pub fn decode(verifier: &MessageVerifier, key: &str, now: jiff::Timestamp) -> Result<Variation> {
+        let data = verifier.verify_raw(key, Some("variation"), now).map_err(|_| Error::InvalidSignature)?;
         Variation::from_json(&Json::parse(&data).map_err(|_| Error::InvalidSignature)?)
     }
 }

@@ -18,7 +18,7 @@ faster or better.
 
 | Path | Package | What |
 |---|---|---|
-| `crates/rails_compat` | `rails_compat` | Rails signing/encryption/serialization contracts, verified by `vectors/` |
+| `crates/rails_compat` | `rails_compat` | Rails signing/encryption/serialization contracts and the Rails formats several crates write (`ActiveSupport::JSON`, `Content-Disposition`), verified by `vectors/` |
 | `crates/kit` | `campfire_kit` | Axum adapter, `Ctx`, params, cookies, session, forgery protection, flash, formats, responses, gzip, and the front server (TLS, ACME, HTTP/2, response cache) |
 | `crates/routes` | `campfire_routes` | Path helpers mirroring `config/routes.rb` |
 | `crates/db` | `campfire_db` | rusqlite over the existing schema, models, queries, fixtures loader |
