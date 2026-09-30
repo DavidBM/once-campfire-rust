@@ -22,13 +22,13 @@ const DEFAULT_USER_AGENT: &str = "Mozilla/4.0 (compatible)";
 /// `UserAgent.parse`: blank strings parse as "Mozilla/4.0 (compatible)".
 pub fn parse(user_agent: &str) -> Agent {
     let mut rest: Vec<char> =
-        if ruby_strip(user_agent).is_empty() { DEFAULT_USER_AGENT.chars().collect() } else { user_agent.chars().collect() };
+        if ruby_compat::strip(user_agent).is_empty() { DEFAULT_USER_AGENT.chars().collect() } else { user_agent.chars().collect() };
 
     let mut products = Vec::new();
     while let Some((length, product)) = match_product(&rest) {
         products.push(product);
         let tail: String = rest[length..].iter().collect();
-        rest = ruby_strip(&tail).chars().collect();
+        rest = ruby_compat::strip(&tail).chars().collect();
     }
 
     let kind = Kind::ALL.into_iter().find(|kind| kind.extends(&products)).unwrap_or(Kind::Base);
@@ -207,12 +207,9 @@ impl Product {
     }
 }
 
+/// `\s` in a Ruby regexp.
 fn is_ruby_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
-}
-
-fn ruby_strip(string: &str) -> &str {
-    string.trim_matches(|c: char| c == '\0' || is_ruby_space(c))
 }
 
 /// ActiveSupport's `present?` for strings.

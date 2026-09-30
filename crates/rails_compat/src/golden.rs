@@ -74,6 +74,18 @@ fn cookie_escaping() {
 }
 
 #[test]
+fn cookie_escaping_is_rack_escape() {
+    // `Rack::Utils.escape` of every character to U+00FF and ruby_compat's edge cases, from
+    // `reference-tools/ruby_core.rb`.
+    let path = workspace_root().join("vectors/ruby_core.json");
+    let ruby_core: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("vectors/ruby_core.json")).expect("valid JSON");
+    for case in ruby_core["strings"].as_array().unwrap() {
+        let raw = str(&case["input"]);
+        assert_eq!(cookies::escape(raw), str(&case["rack_escape"]), "escape {raw:?}");
+    }
+}
+
+#[test]
 fn signed_cookies_are_generated_byte_for_byte() {
     for case in cases("signed_cookies.generate") {
         let raw = cookies::sign(&SECRETS, str(&case["name"]), str(&case["value"]), opt_time(&case["expires_at"]));

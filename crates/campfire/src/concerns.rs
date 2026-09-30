@@ -38,6 +38,7 @@ pub mod user_agent;
 
 use campfire_db::{Ban, Membership, PasswordDigest, Room, Session, User};
 use campfire_kit::{Cookie, Ctx, Error, Result, SameSite, StatusCode, halt};
+use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
 
@@ -222,7 +223,7 @@ pub async fn restore_authentication(c: &mut Ctx) -> Result<bool> {
 pub async fn bot_authentication(c: &mut Ctx) -> Result<bool> {
     let Some(param) = c.params.get("bot_key").filter(|p| p.is_present()) else { return Ok(false) };
     // `params[:bot_key].strip` raises NoMethodError for a hash or array.
-    let Some(bot_key) = param.as_str().map(|key| ruby_strip(key).to_string()) else {
+    let Some(bot_key) = param.as_str().map(|key| ruby_compat::strip(key).to_string()) else {
         return Err(Error::internal(anyhow::anyhow!("undefined method 'strip' for bot_key")));
     };
     let bot = c.app().read(move |conn| User::authenticate_bot(conn, &bot_key)).await?;
@@ -450,7 +451,7 @@ pub fn remember_last_room_visited(c: &mut Ctx, room_id: i64) {
 pub async fn last_room_visited(c: &Ctx) -> Result<Option<Room>> {
     let Some(user_id) = current_user(c).map(|user| user.id) else { return Ok(None) };
     // `find_by(id: cookies[:last_room])` casts the cookie like an integer column would.
-    let last_room = c.cookies.get("last_room").and_then(cast_integer);
+    let last_room = c.cookies.get("last_room").and_then(integer_cast);
     c.app()
         .read(move |conn| {
             if let Some(room_id) = last_room
@@ -469,7 +470,7 @@ pub async fn last_room_visited(c: &Ctx) -> Result<Option<Room>> {
 /// otherwise. Returns the membership and its room.
 pub async fn set_room(c: &mut Ctx) -> Result<(Membership, Room)> {
     let user_id = require_current_user(c)?.id;
-    let Some(room_id) = c.param_str("room_id").and_then(cast_integer) else { return Err(Error::NotFound) };
+    let Some(room_id) = c.param_str("room_id").and_then(integer_cast) else { return Err(Error::NotFound) };
     c.app()
         .read(move |conn| {
             let membership =
@@ -496,119 +497,9 @@ pub fn head(status: StatusCode) -> campfire_kit::Response {
     if matches!(status.as_u16(), 100..=199 | 204 | 205 | 304) { response } else { response.content_type("text/html") }
 }
 
-/// Ruby's `ISSPACE`, which `String#to_i` skips, and `\s` in a regexp.
-const RUBY_SPACE: [char; 6] = [' ', '\t', '\n', '\u{b}', '\u{c}', '\r'];
-
-/// An id param (or cookie) as Active Record binds it for an integer column (`find`,
-/// `find_by(id:)`, `where`): `ActiveModel::Type::Integer#serialize` of a string, with the SQLite
-/// adapter's 8-byte limit. nil unless it starts like a number (`/\A\s*[+-]?\d/`), then `to_i`,
-/// and nil out of range (activemodel's `type/integer.rb`).
-pub fn cast_integer(value: &str) -> Option<i64> {
-    let unsigned = value.trim_start_matches(RUBY_SPACE);
-    let unsigned = unsigned.strip_prefix(['+', '-']).unwrap_or(unsigned);
-    if !unsigned.starts_with(|c: char| c.is_ascii_digit()) {
-        return None;
-    }
-    i64::try_from(ruby_to_i128(value)).ok()
-}
-
-/// `String#to_i`, saturating at the i64 bounds where Ruby goes on to a Bignum.
-pub fn ruby_to_i(value: &str) -> i64 {
-    ruby_to_i128(value).clamp(i64::MIN.into(), i64::MAX.into()) as i64
-}
-
-/// `String#to_i`: optional leading whitespace and sign, an optional `0d`, then digits
-/// (underscores between them). Saturating, and wide enough to tell every i64 from what's past it.
-fn ruby_to_i128(value: &str) -> i128 {
-    let value = value.trim_start_matches(RUBY_SPACE);
-    let (negative, rest) = match value.as_bytes().first() {
-        Some(b'-') => (true, &value[1..]),
-        Some(b'+') => (false, &value[1..]),
-        _ => (false, value),
-    };
-    let rest = rest.strip_prefix("0d").or_else(|| rest.strip_prefix("0D")).unwrap_or(rest);
-    let mut number: i128 = 0;
-    let mut previous_digit = false;
-    for c in rest.chars() {
-        match c {
-            '0'..='9' => {
-                number = number.saturating_mul(10).saturating_add(i128::from(c as u8 - b'0'));
-                previous_digit = true;
-            }
-            '_' if previous_digit => previous_digit = false,
-            _ => break,
-        }
-    }
-    if negative { -number } else { number }
-}
-
-/// Ruby's `String#strip` (ASCII whitespace and NUL).
-fn ruby_strip(s: &str) -> &str {
-    s.trim_matches(|c: char| c == '\0' || c.is_ascii_whitespace() || c == '\u{b}')
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn casts_ids_like_active_record() {
-        // `Room.type_for_attribute(:id).serialize(s)` in the reference; a RangeError is None.
-        for (value, id) in [
-            ("12", Some(12)),
-            ("12abc", Some(12)),
-            (" -3", Some(-3)),
-            (" +12abc", Some(12)),
-            ("\t\n\u{b}\u{c}\r 7", Some(7)),
-            ("\u{b}-0d7", Some(-7)),
-            ("0d12", Some(12)),
-            ("0D12", Some(12)),
-            ("0d", Some(0)),
-            ("0d_5", Some(0)),
-            ("0d0_5", Some(5)),
-            ("5_6", Some(56)),
-            ("5__6", Some(5)),
-            ("1_000", Some(1000)),
-            ("0x5", Some(0)),
-            ("-0", Some(0)),
-            ("5\0", Some(5)),
-            ("3000000000", Some(3000000000)),
-            ("9223372036854775807", Some(i64::MAX)),
-            ("-9223372036854775808", Some(i64::MIN)),
-            ("9223372036854775808", None),
-            ("-9223372036854775809", None),
-            ("99999999999999999999", None),
-            ("\u{a0}5", None),
-            ("\0 5", None),
-            ("_5", None),
-            ("--5", None),
-            ("+-5", None),
-            ("+", None),
-            ("abc", None),
-            ("", None),
-        ] {
-            assert_eq!(cast_integer(value), id, "{value:?}");
-        }
-    }
-
-    #[test]
-    fn to_i_like_ruby() {
-        assert_eq!(ruby_to_i("1717243200000"), 1717243200000);
-        assert_eq!(ruby_to_i(" +12abc"), 12);
-        assert_eq!(ruby_to_i("\t\n\u{b}\u{c}\r 7"), 7);
-        assert_eq!(ruby_to_i("\u{a0}5"), 0);
-        assert_eq!(ruby_to_i("abc"), 0);
-        assert_eq!(ruby_to_i("-5"), -5);
-        assert_eq!(ruby_to_i("--5"), 0);
-        assert_eq!(ruby_to_i("5_6"), 56);
-        assert_eq!(ruby_to_i("5__6"), 5);
-        assert_eq!(ruby_to_i("_5"), 0);
-        assert_eq!(ruby_to_i("0__5"), 0);
-        assert_eq!(ruby_to_i("-0d5"), -5);
-        assert_eq!(ruby_to_i("0d_5"), 0);
-        assert_eq!(ruby_to_i("0x5"), 0);
-        assert_eq!(ruby_to_i("99999999999999999999"), i64::MAX);
-    }
 
     #[test]
     fn before_builders() {

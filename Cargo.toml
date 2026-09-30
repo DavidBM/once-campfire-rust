@@ -17,6 +17,7 @@ unsafe_code = "deny"
 undocumented_unsafe_blocks = "warn"
 
 [workspace.dependencies]
+ruby_compat       = { path = "crates/ruby" }
 rails_compat      = { path = "crates/rails_compat" }
 campfire_kit      = { path = "crates/kit" }
 campfire_routes   = { path = "crates/routes" }
@@ -64,6 +65,7 @@ bcrypt       = "0.17"
 uuid         = { version = "1", features = ["v4"] }
 percent-encoding = "2"
 url          = "2"
+form_urlencoded = "1"
 regex        = "1"
 async-trait  = "0.1"
 libc         = "0.2"

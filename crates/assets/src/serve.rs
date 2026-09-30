@@ -2,8 +2,10 @@
 //! serving the embedded reference/public plus the precompiled public/assets, with the headers
 //! from reference/config/environments/production.rb (`public_file_server.headers`).
 
-use crate::embedded;
+use ruby_compat::rack::byte_ranges;
 use std::borrow::Cow;
+
+use crate::embedded;
 
 /// The last `config.public_file_server.headers` assignment in production.rb wins.
 const CACHE_CONTROL: &str = "public, max-age=2592000";
@@ -102,7 +104,10 @@ fn serve_file(request: &StaticRequest, file: &'static [u8], content_headers: Con
     let mut status = 200;
     let mut body: Body = Body::Borrowed(file);
 
-    match byte_ranges(request.range, size) {
+    // Within the file, so each end fits a usize.
+    let ranges: Option<Vec<(usize, usize)>> = byte_ranges(request.range, size as u64)
+        .map(|ranges| ranges.into_iter().map(|(start, end)| (start as usize, end as usize)).collect());
+    match ranges {
         None => {}
         Some(ranges) if ranges.is_empty() => {
             let message = "Byte range unsatisfiable\n";
@@ -157,111 +162,6 @@ fn serve_file(request: &StaticRequest, file: &'static [u8], content_headers: Con
     }
 
     StaticResponse { status, headers, body }
-}
-
-/// Rack::Utils.get_byte_ranges (rack 3.2.6): None to serve the whole file, Some(empty) when
-/// unsatisfiable. The same as campfire_storage's, which this crate doesn't depend on.
-fn byte_ranges(header: Option<&str>, size: usize) -> Option<Vec<(usize, usize)>> {
-    if size == 0 {
-        return None;
-    }
-    let spec = range_spec(header?)?;
-    if spec.matches(',').count() >= 100 {
-        return None;
-    }
-    let size = size as i128;
-    let mut ranges = Vec::new();
-    for range_spec in ruby_split(spec, split_comma) {
-        if !range_spec.contains('-') {
-            return None;
-        }
-        let parts = ruby_split(range_spec, |s| s.find('-').map(|i| (i, i + 1)));
-        let (r0, r1) = (parts.first().copied(), parts.get(1).copied());
-        let (r0, r1) = match r0 {
-            None | Some("") => {
-                let r1 = r1?;
-                ((size - to_i(r1)).max(0), size - 1)
-            }
-            Some(r0) => {
-                let r0 = to_i(r0);
-                match r1 {
-                    None => (r0, size - 1),
-                    Some(r1) => {
-                        let r1 = to_i(r1);
-                        if r1 < r0 {
-                            return None;
-                        }
-                        (r0, r1.min(size - 1))
-                    }
-                }
-            }
-        };
-        if r0 <= r1 {
-            ranges.push((r0, r1));
-        }
-    }
-    if ranges.iter().map(|(a, b)| b - a + 1).sum::<i128>() > size {
-        return Some(Vec::new());
-    }
-    Some(ranges.into_iter().map(|(a, b)| (a as usize, b as usize)).collect())
-}
-
-/// `http_range =~ /bytes=([^;]+)/`: after the first `bytes=` that something other than `;`
-/// follows, up to the next `;`.
-fn range_spec(header: &str) -> Option<&str> {
-    header.match_indices("bytes=").find_map(|(i, _)| {
-        let rest = &header[i + 6..];
-        let spec = &rest[..rest.find(';').unwrap_or(rest.len())];
-        (!spec.is_empty()).then_some(spec)
-    })
-}
-
-/// `/,[ \t]*/`
-fn split_comma(s: &str) -> Option<(usize, usize)> {
-    let i = s.find(',')?;
-    let rest = &s[i + 1..];
-    let skipped = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-    Some((i, i + 1 + skipped))
-}
-
-/// `String#split` with a separator finder: trailing empty fields are dropped.
-fn ruby_split(s: &str, find: impl Fn(&str) -> Option<(usize, usize)>) -> Vec<&str> {
-    let mut fields = Vec::new();
-    let mut rest = s;
-    while let Some((start, end)) = find(rest) {
-        fields.push(&rest[..start]);
-        rest = &rest[end..];
-    }
-    fields.push(rest);
-    while fields.last() == Some(&"") {
-        fields.pop();
-    }
-    fields
-}
-
-/// String#to_i: leading whitespace, an optional sign and `0d`, then digits (underscores between
-/// them). Saturating: past i128 is past any file size.
-fn to_i(s: &str) -> i128 {
-    let s = s.trim_start_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']);
-    let (negative, digits) = match s.as_bytes().first() {
-        Some(b'-') => (true, &s[1..]),
-        Some(b'+') => (false, &s[1..]),
-        _ => (false, s),
-    };
-    let digits = digits.strip_prefix("0d").or_else(|| digits.strip_prefix("0D")).unwrap_or(digits);
-    let mut value: i128 = 0;
-    let mut previous_underscore = false;
-    for (i, c) in digits.char_indices() {
-        match c {
-            '0'..='9' => {
-                value = value.saturating_mul(10).saturating_add((c as u8 - b'0') as i128);
-                previous_underscore = false;
-            }
-            '_' if i > 0 && !previous_underscore => previous_underscore = true,
-            _ => break,
-        }
-    }
-    if negative { -value } else { value }
 }
 
 /// FileHandler#clean_path: chomp("/"), percent-decode, reject NUL, then
@@ -378,67 +278,4 @@ fn mime_type(extname: &[u8]) -> Option<&'static str> {
         ".zip" => "application/zip",
         _ => return None,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Byte ranges, `None` for the whole file.
-    type Ranges = Option<&'static [(usize, usize)]>;
-
-    /// `Rack::Utils.get_byte_ranges(header, size)` in the reference (rack 3.2.6).
-    #[rustfmt::skip]
-    const RACK_RANGES: &[(&str, usize, Ranges)] = &[
-        ("bytes=0-4", 10, Some(&[(0, 4)])),
-        ("bytes=5-", 10, Some(&[(5, 9)])),
-        ("bytes=-3", 10, Some(&[(7, 9)])),
-        ("bytes=-30", 10, Some(&[(0, 9)])),
-        ("bytes=0-99999999999999999999", 10, Some(&[(0, 9)])),
-        ("bytes=99999999999999999999-", 10, Some(&[])),
-        ("bytes=-99999999999999999999", 10, Some(&[(0, 9)])),
-        ("bytes=0-1,", 10, Some(&[(0, 1)])),
-        ("bytes= -5", 10, Some(&[(0, 5)])),
-        ("bytes=0-1, 3-4", 10, Some(&[(0, 1), (3, 4)])),
-        ("bytes=0-1,\t 3-4", 10, Some(&[(0, 1), (3, 4)])),
-        ("bytes=3-5,1-2", 10, Some(&[(3, 5), (1, 2)])),
-        ("bytes=+1-2", 10, Some(&[(1, 2)])),
-        ("bytes=1-+2", 10, Some(&[(1, 2)])),
-        ("bytes=1_0-2_0", 100, Some(&[(10, 20)])),
-        ("bytes=0d5-0d9", 100, Some(&[(5, 9)])),
-        ("bytes=\u{a0}1-2", 10, Some(&[(0, 2)])),
-        ("bytes=a-b", 10, Some(&[(0, 0)])),
-        ("bytes=0-0x5", 10, Some(&[(0, 0)])),
-        ("bytes=0-1 ", 10, Some(&[(0, 1)])),
-        ("bytes=0 -1", 10, Some(&[(0, 1)])),
-        ("bytes=1-2-3", 10, Some(&[(1, 2)])),
-        ("bytes=9-9", 10, Some(&[(9, 9)])),
-        ("bytes=10-", 10, Some(&[])),
-        ("bytes=10-12", 10, Some(&[])),
-        ("bytes=-0", 10, Some(&[])),
-        ("bytes=--5", 10, Some(&[])),
-        ("bytes=0-4,5-9,0-0", 10, Some(&[])),
-        ("bytes=;bytes=2-3", 10, Some(&[(2, 3)])),
-        ("bytes=0-1;bytes=2-3", 10, Some(&[(0, 1)])),
-        ("xbytes=0-1", 10, Some(&[(0, 1)])),
-        ("bytes=;0-1", 10, None),
-        ("bytes=", 10, None),
-        ("bytes=-", 10, None),
-        ("bytes=5", 10, None),
-        ("bytes=1-0", 10, None),
-        ("bytes=0-1,,2-3", 10, None),
-        ("items=0-1", 10, None),
-        ("bytes=0-4", 0, None),
-    ];
-
-    #[test]
-    fn byte_ranges_match_rack() {
-        for &(header, size, expected) in RACK_RANGES {
-            assert_eq!(byte_ranges(Some(header), size), expected.map(<[_]>::to_vec), "{header:?} of {size}");
-        }
-        assert_eq!(byte_ranges(None, 10), None);
-        // 99 commas are read, and 100 aren't (`max_ranges`).
-        assert_eq!(byte_ranges(Some(&format!("bytes=0-1,{}", "0-0,".repeat(98))), 10), Some(vec![]));
-        assert_eq!(byte_ranges(Some(&format!("bytes=0-1,{}", "0-0,".repeat(99))), 10), None);
-    }
 }

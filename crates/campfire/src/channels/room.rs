@@ -2,10 +2,10 @@
 //! `PresenceChannel` and `TypingNotificationsChannel` inherit from it.
 use campfire_cable::{Channel, ChannelResult, Params, Subscription};
 use campfire_db::{Database, Room};
+use ruby_compat::integer_cast;
 use serde_json::Value;
 
 use super::{CableUser, room_gid};
-use crate::concerns::cast_integer;
 
 pub struct RoomChannel {
     db: Database,
@@ -44,7 +44,7 @@ pub fn cast_id(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().filter(|f| f.is_finite() && f.abs() < 9.2e18).map(|f| f.trunc() as i64)),
         Value::Bool(b) => Some(i64::from(*b)),
-        Value::String(s) => cast_integer(s),
+        Value::String(s) => integer_cast(s),
         _ => None,
     }
 }

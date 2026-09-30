@@ -5,9 +5,10 @@ use askama::Template;
 use campfire_db::{Role, User, UserChanges};
 use campfire_kit::{Ctx, Error, Result, format};
 use campfire_views::accounts;
+use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, cast_integer};
+use crate::concerns::{self, Before};
 use crate::controllers::presenters;
 use crate::controllers::presenters::pagination::Page;
 use crate::controllers::presenters::view_context::Layout;
@@ -53,7 +54,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 
 /// `User.active.find(params[:user_id] || params[:id])`
 async fn set_user(c: &Ctx) -> Result<User> {
-    let id = c.param_str("user_id").or_else(|| c.param_str("id")).and_then(cast_integer).ok_or(Error::NotFound)?;
+    let id = c.param_str("user_id").or_else(|| c.param_str("id")).and_then(integer_cast).ok_or(Error::NotFound)?;
     c.app().read(move |conn| User::find_active(conn, id)).await
 }
 

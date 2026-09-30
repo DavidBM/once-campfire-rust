@@ -5,9 +5,10 @@ pub mod keys;
 use campfire_db::{User, UserChanges};
 use campfire_kit::{Ctx, Error, Param, ParamMap, Result, StatusCode, format, permit_keys};
 use campfire_views::accounts;
+use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, cast_integer};
+use crate::concerns::{self, Before};
 use crate::controllers::presenters;
 use crate::controllers::presenters::attachments::{self, Assignment, Record};
 use crate::controllers::presenters::page::framed_page;
@@ -101,7 +102,7 @@ async fn set_bot(c: &Ctx) -> Result<User> {
 }
 
 pub(crate) async fn find_active_bot(c: &Ctx, key: &str) -> Result<User> {
-    let id = c.param_str(key).and_then(cast_integer).ok_or(Error::NotFound)?;
+    let id = c.param_str(key).and_then(integer_cast).ok_or(Error::NotFound)?;
     c.app().read(move |conn| User::find_active_bot(conn, id)).await
 }
 

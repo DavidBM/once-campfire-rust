@@ -1,10 +1,12 @@
 //! `ContentFilters::TextMessagePresentationFilters` (reference/app/helpers/content_filters/*.rb):
 //! RemoveSoloUnfurledLinkText, SanitizeTags, SanitizeAttributes, applied in that order.
 
+use ruby_compat::strip;
+
 use crate::Error;
 use crate::attachables::{OPENGRAPH_EMBED_CONTENT_TYPE, RenderContext, opengraph_embed_from_node};
 use crate::content::{ATTACHMENT_TAG, Content};
-use crate::ruby::{is_blank, strip};
+use crate::ruby::is_blank;
 use crate::sanitizer::{self, SafeList, sanitize_tags_allowed_tags};
 use crate::uri::{self, UriError};
 

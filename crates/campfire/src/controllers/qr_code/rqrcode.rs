@@ -684,28 +684,12 @@ mod tests {
         svg: Option<String>,
     }
 
-    fn decode_base64(input: &str) -> Vec<u8> {
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = Vec::new();
-        let (mut buffer, mut bits) = (0u32, 0);
-        for b in input.bytes().filter(|&b| b != b'=') {
-            buffer = (buffer << 6) | ALPHABET.iter().position(|&a| a == b).unwrap() as u32;
-            bits += 6;
-            if bits >= 8 {
-                bits -= 8;
-                out.push((buffer >> bits) as u8);
-                buffer &= (1 << bits) - 1;
-            }
-        }
-        out
-    }
-
     #[test]
     fn matches_rqrcode() {
         let vectors: Vec<Vector> = serde_json::from_str(include_str!("testdata/rqrcode.json")).unwrap();
         assert!(vectors.len() >= 30);
         for vector in vectors {
-            let input = decode_base64(&vector.input_base64);
+            let input = rails_compat::encoding::strict_decode(&vector.input_base64).unwrap();
             let segment = Segment::new(&input);
             assert_eq!(minimum_version(&segment), Some(vector.version), "version for {:?}", vector.input_base64);
             let modules: Vec<String> =

@@ -345,6 +345,7 @@ dependencies = [
  "campfire_views",
  "flate2",
  "futures-util",
+ "hex",
  "hkdf",
  "http",
  "http-body-util",
@@ -357,6 +358,7 @@ dependencies = [
  "rails_compat",
  "rand 0.9.5",
  "regex",
+ "ruby_compat",
  "rusqlite",
  "rustls",
  "rustls-native-certs",
@@ -381,6 +383,7 @@ name = "campfire_assets"
 version = "0.1.0"
 dependencies = [
  "fancy-regex",
+ "ruby_compat",
  "serde_json",
  "sha1",
  "sha2",
@@ -398,6 +401,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rails_compat",
+ "ruby_compat",
  "serde",
  "serde_json",
  "sha1",
@@ -455,6 +459,7 @@ dependencies = [
  "rand 0.9.5",
  "rcgen",
  "regex",
+ "ruby_compat",
  "rustls",
  "serde",
  "serde_json",
@@ -481,6 +486,7 @@ dependencies = [
  "html5ever",
  "rails_compat",
  "regex",
+ "ruby_compat",
  "serde_json",
  "thiserror",
 ]
@@ -498,6 +504,7 @@ dependencies = [
  "md-5",
  "rails_compat",
  "rand 0.9.5",
+ "ruby_compat",
  "rusqlite",
  "serde",
  "serde_json",
@@ -512,9 +519,11 @@ version = "0.1.0"
 dependencies = [
  "askama",
  "campfire_routes",
+ "crc32fast",
  "html5ever",
  "jiff",
  "rails_compat",
+ "ruby_compat",
  "serde",
  "serde_json",
 ]
@@ -1910,6 +1919,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "bcrypt",
+ "form_urlencoded",
  "hex",
  "hmac",
  "jiff",
@@ -2043,6 +2053,13 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ruby_compat"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

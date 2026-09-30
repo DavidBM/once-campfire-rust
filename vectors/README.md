@@ -13,6 +13,7 @@ They use the fixed `SECRET_KEY_BASE` from `parity/.env.reference` (recorded in e
     reference-tools/run.sh reference-tools/rails_compat_vectors.rb      # writes vectors/rails_compat.json
     CARGO_TARGET_DIR=target/rails_compat cargo test -p rails_compat     # also writes target/rails_compat_rust_output.json
     reference-tools/run.sh reference-tools/rails_compat_verify_rust.rb  # Rails verifies what Rust generated
+    reference-tools/run.sh reference-tools/ruby_core.rb                 # writes vectors/ruby_core.json
 
 `run.sh` uses the `campfire-reference` Docker image (the oracle). With `REFERENCE_NATIVE=1`, or
 without Docker, it runs the local Ruby (see `reference/.ruby-version`) with the same bundle

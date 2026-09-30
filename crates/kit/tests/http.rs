@@ -175,9 +175,7 @@ async fn created(c: &mut Ctx) -> Result {
 
 async fn file(c: &mut Ctx) -> Result {
     let path = c.param_str("path").unwrap().to_string();
-    let mut options = SendOptions::inline("image/png");
-    options.ranges = c.param_str("ranges").is_some();
-    c.send_file(path, options)
+    c.send_file(path, SendOptions::inline("image/png"))
 }
 
 async fn logo(c: &mut Ctx) -> Result {
@@ -624,7 +622,7 @@ async fn head_with_location() {
 }
 
 #[tokio::test]
-async fn send_file_with_disposition_and_ranges() {
+async fn send_file_with_disposition_and_the_whole_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("logo.png");
     std::fs::write(&path, b"0123456789").unwrap();
@@ -638,22 +636,11 @@ async fn send_file_with_disposition_and_ranges() {
     assert_eq!(whole.header("content-transfer-encoding"), Some("binary"));
     assert_eq!(whole.header("content-length"), Some("10"));
 
+    // Rails' `send_file` ignores Range.
     let ignored =
         send(&app, get(&format!("/file?path={encoded}")).header(header::RANGE, "bytes=2-4").body(AxumBody::empty()).unwrap()).await;
     assert_eq!(ignored.status, StatusCode::OK);
-
-    let ranged =
-        send(&app, get(&format!("/file?path={encoded}&ranges=1")).header(header::RANGE, "bytes=2-4").body(AxumBody::empty()).unwrap())
-            .await;
-    assert_eq!(ranged.status, StatusCode::PARTIAL_CONTENT);
-    assert_eq!(ranged.body, b"234");
-    assert_eq!(ranged.header("content-range"), Some("bytes 2-4/10"));
-
-    let unsatisfiable =
-        send(&app, get(&format!("/file?path={encoded}&ranges=1")).header(header::RANGE, "bytes=20-").body(AxumBody::empty()).unwrap())
-            .await;
-    assert_eq!(unsatisfiable.status, StatusCode::RANGE_NOT_SATISFIABLE);
-    assert_eq!(unsatisfiable.header("content-range"), Some("bytes */10"));
+    assert_eq!(ignored.body, b"0123456789");
 
     let missing = send(&app, get("/file?path=%2Fnope").body(AxumBody::empty()).unwrap()).await;
     assert_eq!(missing.status, StatusCode::INTERNAL_SERVER_ERROR);

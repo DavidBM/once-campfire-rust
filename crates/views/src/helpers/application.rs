@@ -1,7 +1,7 @@
 //! `ApplicationHelper`, `CableHelper`, `VersionHelper`, `TimeHelper`, `ClipboardHelper`,
 //! `DropTargetHelper` and `QrCodeHelper` (`reference/app/helpers/*.rb`).
 
-use base64_url::urlsafe_encode64;
+use rails_compat::encoding;
 
 use super::assets::image_tag;
 use super::html::{Html, Safe};
@@ -89,9 +89,10 @@ pub fn button_to_copy_to_clipboard(url: &str, content: &str) -> Html {
     content_tag("button", &options, content)
 }
 
-/// `link_to_zoom_qr_code(url) { content }`: the QR code route takes the URL, base64url-encoded.
+/// `link_to_zoom_qr_code(url) { content }`: the QR code route takes the URL,
+/// `Base64.urlsafe_encode64`d (reference/app/helpers/qr_code_helper.rb).
 pub fn link_to_zoom_qr_code(url: &str, content: &str) -> Html {
-    let path = campfire_routes::qr_code(urlsafe_encode64(url));
+    let path = campfire_routes::qr_code(encoding::urlsafe_encode_padded(url.as_bytes()));
     let options =
         attrs().class("btn").data("lightbox_target", "image").data("action", "lightbox#open").data("lightbox_url_value", path.as_str());
     link_to(&path, options, content)
@@ -141,24 +142,6 @@ pub fn to_sentence(items: &[String], two_words_connector: &str) -> String {
     }
 }
 
-mod base64_url {
-    /// `Base64.urlsafe_encode64` (padded).
-    pub fn urlsafe_encode64(input: &str) -> String {
-        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let bytes = input.as_bytes();
-        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-        for chunk in bytes.chunks(3) {
-            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            out.push(ALPHABET[(n >> 18) as usize & 63] as char);
-            out.push(ALPHABET[(n >> 12) as usize & 63] as char);
-            out.push(if chunk.len() > 1 { ALPHABET[(n >> 6) as usize & 63] as char } else { '=' });
-            out.push(if chunk.len() > 2 { ALPHABET[n as usize & 63] as char } else { '=' });
-        }
-        out
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,7 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn encodes_urlsafe_base64() {
-        assert_eq!(base64_url::urlsafe_encode64("http://x/?a"), "aHR0cDovL3gvP2E=");
+    fn qr_code_links_take_the_url_urlsafe_base64_encoded() {
+        // `Base64.urlsafe_encode64` in the reference: padded, with `-` and `_`.
+        assert!(link_to_zoom_qr_code("http://x/?a", "").0.contains("href=\"/qr_code/aHR0cDovL3gvP2E=\""));
+        assert!(link_to_zoom_qr_code("http://x/?>?", "").0.contains("href=\"/qr_code/aHR0cDovL3gvPz4_\""));
     }
 }

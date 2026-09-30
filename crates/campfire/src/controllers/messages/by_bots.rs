@@ -5,13 +5,14 @@
 use campfire_db::{Message, Room};
 use campfire_kit::{Ctx, Param, Response, Result, StatusCode, format, halt, permit_keys};
 use campfire_views::messages::json;
+use ruby_compat::integer_cast;
 
 use super::{
     MessageParams, attachment_assignment, broadcast_create, broadcast_replace, create_message, deliver_webhooks_to_bots, destroy_message,
     ensure_can_administer, find_paged_messages, present, set_message, update_message,
 };
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, before_actions, cast_integer, require_current_user};
+use crate::concerns::{self, Before, before_actions, require_current_user};
 
 fn before() -> Before {
     Before::default().allow_bot_access()
@@ -76,7 +77,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 /// `set_room`: `Current.user.rooms.find_by(id: params[:room_id])`, else `head :not_found`.
 async fn set_room(c: &mut Ctx) -> Result<Room> {
     let user_id = require_current_user(c)?.id;
-    let room = match c.param_str("room_id").and_then(cast_integer) {
+    let room = match c.param_str("room_id").and_then(integer_cast) {
         Some(id) => c.app().read(move |conn| Room::find_for_user(conn, user_id, id)).await?,
         None => None,
     };

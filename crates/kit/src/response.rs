@@ -134,13 +134,11 @@ pub struct SendOptions {
     /// `disposition:`; `None` omits the header. Defaults to `attachment`.
     pub disposition: Option<String>,
     pub status: StatusCode,
-    /// Honor `Range` requests (206/416). Rails' `send_file` doesn't; Active Storage's proxy does.
-    pub ranges: bool,
 }
 
 impl Default for SendOptions {
     fn default() -> Self {
-        Self { filename: None, content_type: None, disposition: Some("attachment".into()), status: StatusCode::OK, ranges: false }
+        Self { filename: None, content_type: None, disposition: Some("attachment".into()), status: StatusCode::OK }
     }
 }
 
@@ -150,8 +148,9 @@ impl SendOptions {
     }
 }
 
-/// `send_file_headers!` then the body: file or bytes.
-pub(crate) fn send(options: &SendOptions, range_header: Option<&str>, body: SendBody) -> Response {
+/// `send_file_headers!` then the body: file or bytes, whole, whatever the `Range` header asks for
+/// (as Rails' `send_file` and `send_data` do).
+pub(crate) fn send(options: &SendOptions, body: SendBody) -> Response {
     let content_type = options.content_type.clone().unwrap_or_else(|| {
         options
             .filename
@@ -166,90 +165,16 @@ pub(crate) fn send(options: &SendOptions, range_header: Option<&str>, body: Send
         response = response.header(header::CONTENT_DISPOSITION, &content_disposition(disposition, options.filename.as_deref()));
     }
     response = response.header("content-transfer-encoding", "binary");
-
-    let total = body.len();
-    let range = if options.ranges {
-        response = response.header(header::ACCEPT_RANGES, "bytes");
-        range_header.map(|h| parse_range(h, total))
-    } else {
-        None
+    response.body = match body {
+        SendBody::File(path, len) => Body::File(FileBody { path, offset: 0, len }),
+        SendBody::Bytes(bytes) => Body::Bytes(bytes),
     };
-
-    match range {
-        Some(RangeResult::Unsatisfiable) => {
-            let mut response = Response::new(StatusCode::RANGE_NOT_SATISFIABLE).header(header::CONTENT_RANGE, &format!("bytes */{total}"));
-            response.body = Body::Empty;
-            response
-        }
-        Some(RangeResult::Range(start, end)) => {
-            response.status = StatusCode::PARTIAL_CONTENT;
-            response = response.header(header::CONTENT_RANGE, &format!("bytes {start}-{end}/{total}"));
-            response.body = body.slice(start, end - start + 1);
-            response
-        }
-        None | Some(RangeResult::Ignore) => {
-            response.body = body.slice(0, total);
-            response
-        }
-    }
+    response
 }
 
 pub(crate) enum SendBody {
     File(PathBuf, u64),
     Bytes(Bytes),
-}
-
-impl SendBody {
-    fn len(&self) -> u64 {
-        match self {
-            SendBody::File(_, len) => *len,
-            SendBody::Bytes(bytes) => bytes.len() as u64,
-        }
-    }
-
-    fn slice(self, offset: u64, len: u64) -> Body {
-        match self {
-            SendBody::File(path, _) => Body::File(FileBody { path, offset, len }),
-            SendBody::Bytes(bytes) => Body::Bytes(bytes.slice(offset as usize..(offset + len) as usize)),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum RangeResult {
-    Range(u64, u64),
-    Unsatisfiable,
-    /// Malformed or multi-range: serve the whole thing.
-    Ignore,
-}
-
-/// `Rack::Utils.get_byte_ranges`, for the single-range case.
-fn parse_range(header: &str, size: u64) -> RangeResult {
-    let Some(spec) = header.trim().strip_prefix("bytes=") else { return RangeResult::Ignore };
-    let ranges: Vec<&str> = spec.split(',').map(str::trim).collect();
-    if ranges.len() != 1 {
-        return RangeResult::Ignore;
-    }
-    let Some((first, last)) = ranges[0].split_once('-') else { return RangeResult::Ignore };
-    let parse = |s: &str| if s.is_empty() { Some(None) } else { s.parse::<u64>().ok().map(Some) };
-    let (Some(first), Some(last)) = (parse(first.trim()), parse(last.trim())) else { return RangeResult::Ignore };
-    let (start, end) = match (first, last) {
-        (None, None) => return RangeResult::Ignore,
-        (None, Some(suffix)) => {
-            if suffix == 0 {
-                return RangeResult::Unsatisfiable;
-            }
-            (size.saturating_sub(suffix), size.saturating_sub(1))
-        }
-        (Some(start), None) => (start, size.saturating_sub(1)),
-        (Some(start), Some(end)) => {
-            if end < start {
-                return RangeResult::Ignore;
-            }
-            (start, end.min(size.saturating_sub(1)))
-        }
-    };
-    if size == 0 || start >= size { RangeResult::Unsatisfiable } else { RangeResult::Range(start, end) }
 }
 
 /// `Cache-Control` directives set by `expires_in`, `fresh_when(public:)`, `no_store` and friends,
@@ -366,17 +291,6 @@ mod tests {
             content_disposition("attachment", Some("Łódź ×.pdf")),
             "attachment; filename=\"Lodz x.pdf\"; filename*=UTF-8''%C5%81%C3%B3d%C5%BA%20%C3%97.pdf"
         );
-    }
-
-    #[test]
-    fn ranges() {
-        assert_eq!(parse_range("bytes=0-9", 100), RangeResult::Range(0, 9));
-        assert_eq!(parse_range("bytes=90-", 100), RangeResult::Range(90, 99));
-        assert_eq!(parse_range("bytes=-10", 100), RangeResult::Range(90, 99));
-        assert_eq!(parse_range("bytes=95-200", 100), RangeResult::Range(95, 99));
-        assert_eq!(parse_range("bytes=100-", 100), RangeResult::Unsatisfiable);
-        assert_eq!(parse_range("bytes=0-1,5-6", 100), RangeResult::Ignore);
-        assert_eq!(parse_range("items=0-1", 100), RangeResult::Ignore);
     }
 
     #[test]

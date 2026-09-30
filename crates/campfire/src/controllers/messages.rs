@@ -13,10 +13,11 @@ use campfire_kit::{Ctx, Error, Freshness, Param, Result, StatusCode, halt, permi
 use campfire_richtext::Content;
 use campfire_storage::{Blob, Staged, Variation};
 use campfire_views::messages as views;
+use ruby_compat::integer_cast;
 
 use crate::active_storage::{self, keep_after_commit, storage_error};
 use crate::app::{App, AppCtx};
-use crate::concerns::{self, Before, before_actions, cast_integer, require_current_user};
+use crate::concerns::{self, Before, before_actions, require_current_user};
 use crate::controllers::presenters::attachments::Assignment;
 use crate::controllers::presenters::page::{self, Rendered};
 use crate::controllers::presenters::{DbResolver, Presenter, cache_key_with_version, room_kind};
@@ -145,7 +146,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 
 /// `@room.messages.find(params[:id])`
 pub(crate) async fn set_message(c: &mut Ctx, room: &Room) -> Result<Message> {
-    let Some(id) = c.param_str("id").and_then(cast_integer) else { return Err(Error::NotFound) };
+    let Some(id) = c.param_str("id").and_then(integer_cast) else { return Err(Error::NotFound) };
     let room_id = room.id;
     c.app().read(move |conn| Message::find_in_room(conn, room_id, id)).await
 }
@@ -186,7 +187,7 @@ pub(crate) fn attachment_assignment(permitted: &campfire_kit::ParamMap) -> Resul
 
 /// `@room.messages.find(params[:before])` and friends (`find_paged_messages`).
 pub(crate) async fn find_paged_messages(c: &Ctx, room: &Room) -> Result<Vec<Message>> {
-    let present = |key: &str| c.params.get(key).filter(|p| p.is_present()).map(|p| p.as_str().and_then(cast_integer));
+    let present = |key: &str| c.params.get(key).filter(|p| p.is_present()).map(|p| p.as_str().and_then(integer_cast));
     let (before, after) = (present("before"), present("after"));
     let room_id = room.id;
     c.app()

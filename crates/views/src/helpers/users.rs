@@ -19,20 +19,8 @@ pub const AVATAR_COLORS: [&str; 18] = [
 /// `avatar_background_color(user)`: `Zlib.crc32(user.to_param)` picks the color.
 pub fn avatar_background_color(user_id: impl std::borrow::Borrow<i64>) -> &'static str {
     let user_id = *user_id.borrow();
-    let crc = crc32(user_id.to_string().as_bytes());
+    let crc = crc32fast::hash(user_id.to_string().as_bytes());
     AVATAR_COLORS[(crc % AVATAR_COLORS.len() as u32) as usize]
-}
-
-/// Zlib's CRC-32 (IEEE, reflected).
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &byte in bytes {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
-        }
-    }
-    !crc
 }
 
 /// `User#initials`: `name.scan(/\b\w/).join`. Ruby's `\w` is ASCII-only while `\b` sees
@@ -161,7 +149,10 @@ mod tests {
     }
 
     #[test]
-    fn crc32_matches_zlib() {
-        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    fn avatar_colors_like_zlib_crc32() {
+        // `AVATAR_COLORS[Zlib.crc32(id.to_s) % 18]` in the reference.
+        for (id, index) in [(1, 11), (2, 13), (42, 8), (1000, 3)] {
+            assert_eq!(avatar_background_color(id), AVATAR_COLORS[index], "{id}");
+        }
     }
 }

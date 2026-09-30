@@ -17,7 +17,7 @@ use crate::controllers::presenters::{Presenter, user_view};
 /// setting `@room`, so `remember_last_room_visited` raises (a 500).
 pub async fn show(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
-    let id = c.param_str("id").and_then(crate::concerns::cast_integer).ok_or(Error::NotFound)?;
+    let id = c.param_str("id").and_then(ruby_compat::integer_cast).ok_or(Error::NotFound)?;
     redirect_to_room(c, id)
 }
 

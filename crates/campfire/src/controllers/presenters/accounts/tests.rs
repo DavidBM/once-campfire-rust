@@ -192,7 +192,7 @@ impl Browser<'_> {
 }
 
 fn encode(value: &str) -> String {
-    campfire_views::helpers::url::cgi_escape(value)
+    ruby_compat::cgi_escape(value)
 }
 
 fn assert_redirect(reply: &Reply, location: &str) {

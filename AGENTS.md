@@ -18,6 +18,7 @@ faster or better.
 
 | Path | Package | What |
 |---|---|---|
+| `crates/ruby` | `ruby_compat` | Ruby's own string behaviour the other crates share (ERB escaping, `String#to_i`/`#to_f`/`#strip`, `Float#to_s`, `CGI.escape`, `ERB::Util.url_encode`, Active Record's integer binding, Rack's byte ranges), checked against Ruby by `vectors/ruby_core.json`; no dependencies |
 | `crates/rails_compat` | `rails_compat` | Rails signing/encryption/serialization contracts and the Rails formats several crates write (`ActiveSupport::JSON`, `Content-Disposition`), verified by `vectors/`, and the app's `Clock` (`Time.current`, and time travel for tests) |
 | `crates/kit` | `campfire_kit` | Axum adapter, `Ctx`, params, cookies, session, forgery protection, flash, formats, responses, gzip, and the front server (TLS, ACME, HTTP/2, response cache) |
 | `crates/routes` | `campfire_routes` | Path helpers mirroring `config/routes.rb` |

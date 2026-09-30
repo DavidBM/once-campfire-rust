@@ -148,9 +148,7 @@ fn default_vapid_subject(tls_domains: Option<String>) -> String {
 }
 
 fn dummy_secret() -> String {
-    use rand::Rng;
-    let bytes: [u8; 64] = rand::rng().random();
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    hex::encode(rand::random::<[u8; 64]>())
 }
 
 #[cfg(test)]

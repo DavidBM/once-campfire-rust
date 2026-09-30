@@ -426,14 +426,12 @@ impl Ctx {
         if options.filename.is_none() {
             options.filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
         }
-        let range = self.request.header("range").map(str::to_string);
-        Ok(response::send(&options, range.as_deref(), SendBody::File(path.to_path_buf(), metadata.len())))
+        Ok(response::send(&options, SendBody::File(path.to_path_buf(), metadata.len())))
     }
 
     /// `send_data data, type:, disposition:, filename:`
     pub fn send_data(&mut self, data: impl Into<Bytes>, options: SendOptions) -> Response {
-        let range = self.request.header("range").map(str::to_string);
-        response::send(&options, range.as_deref(), SendBody::Bytes(data.into()))
+        response::send(&options, SendBody::Bytes(data.into()))
     }
 
     // --- Conditional GET -----------------------------------------------------------------------

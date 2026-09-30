@@ -3,9 +3,10 @@
 
 use campfire_db::{Membership, PushSubscription};
 use campfire_kit::{Ctx, Error, Result};
+use ruby_compat::integer_cast;
 
 use crate::app::AppCtx;
-use crate::concerns::{self, Before, cast_integer};
+use crate::concerns::{self, Before};
 use crate::integrations::net::Network;
 use crate::integrations::web_push;
 
@@ -13,7 +14,7 @@ use crate::integrations::web_push;
 pub async fn create(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     let user_id = concerns::require_current_user(c)?.id;
-    let id = c.param_str("push_subscription_id").and_then(cast_integer).ok_or(Error::NotFound)?;
+    let id = c.param_str("push_subscription_id").and_then(integer_cast).ok_or(Error::NotFound)?;
     let (subscription, badge) = c
         .app()
         .read(move |conn| {

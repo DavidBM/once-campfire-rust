@@ -150,24 +150,9 @@ fn push_attribute(tag: &mut String, name: &str, value: &str) {
     tag.push(' ');
     tag.push_str(name);
     tag.push_str("=\"");
-    tag.push_str(&html_escape(value));
+    // `ERB::Util.unwrapped_html_escape`
+    ruby_compat::erb::push_html_escaped(tag, value);
     tag.push('"');
-}
-
-/// `ERB::Util.unwrapped_html_escape`.
-pub fn html_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for c in value.chars() {
-        match c {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            c => escaped.push(c),
-        }
-    }
-    escaped
 }
 
 /// `Turbo::StreamsChannel.broadcast_*_to`. Streamables are the stream name parts (GID params

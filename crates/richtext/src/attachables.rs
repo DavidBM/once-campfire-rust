@@ -3,11 +3,13 @@
 
 use rails_compat::encoding;
 use regex::Regex;
+use ruby_compat::erb::html_escape;
+use ruby_compat::strip;
 use std::sync::LazyLock;
 
 use crate::Error;
 use crate::dom::{Dom, NodeId};
-use crate::ruby::{html_escape, is_blank, presence, strip, truncate};
+use crate::ruby::{is_blank, presence, truncate};
 use crate::uri::{self, UriError};
 
 pub const MENTION_CONTENT_TYPE: &str = "application/vnd.campfire.mention";

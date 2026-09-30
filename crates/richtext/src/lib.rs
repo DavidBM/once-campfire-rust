@@ -27,7 +27,8 @@ pub use content::Content;
 
 use content::{attachment_nodes, render_attachment_html};
 use dom::Dom;
-use ruby::{is_blank, strip};
+use ruby::is_blank;
+use ruby_compat::strip;
 use sanitizer::SafeList;
 
 /// Something Ruby would have raised while rendering. Callers mirror what the Rails code does with

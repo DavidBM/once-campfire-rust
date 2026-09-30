@@ -6,10 +6,11 @@ pub mod users {
     use campfire_db::{Connection, Room, User};
     use campfire_kit::{Ctx, Error, Result, StatusCode, format};
     use campfire_views::autocompletable;
+    use ruby_compat::integer_cast;
     use rusqlite::types::Value;
 
     use crate::app::AppCtx;
-    use crate::concerns::{self, Before, cast_integer};
+    use crate::concerns::{self, Before};
     use crate::controllers::presenters;
     use crate::controllers::presenters::pagination::Page;
     use crate::controllers::presenters::view_context::Layout;
@@ -22,7 +23,7 @@ pub mod users {
         // `params[:room_id].present? ? Current.user.rooms.find(params[:room_id]).users : User.all`
         let room_id = match c.params.get("room_id").filter(|param| param.is_present()) {
             Some(param) => {
-                let id = param.as_str().and_then(cast_integer).ok_or(Error::NotFound)?;
+                let id = param.as_str().and_then(integer_cast).ok_or(Error::NotFound)?;
                 let room = c.app().read(move |conn| Room::find_for_user(conn, user_id, id)).await?;
                 Some(room.ok_or(Error::NotFound)?.id)
             }

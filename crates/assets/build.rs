@@ -13,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ruby_compat::erb::html_escape;
+
 // Propshaft's Railtie default; the app doesn't change it.
 const PREFIX: &str = "/assets";
 
@@ -163,7 +165,7 @@ fn importmap_tags(load_path: &propshaft::LoadPath, entries: &[(String, String, S
 
     let mut tags = vec![format!("<script type=\"importmap\" data-turbo-track=\"reload\">{json}</script>")];
     tags.push(
-        preloads.iter().map(|path| format!("<link rel=\"modulepreload\" href=\"{}\">", escape_html(path))).collect::<Vec<_>>().join("\n"),
+        preloads.iter().map(|path| format!("<link rel=\"modulepreload\" href=\"{}\">", html_escape(path))).collect::<Vec<_>>().join("\n"),
     );
     tags.push("<script type=\"module\">import \"application\"</script>".to_string());
     tags.join("\n")
@@ -202,11 +204,6 @@ fn json(s: &str) -> String {
     }
     out.push('"');
     out
-}
-
-/// ERB::Util.html_escape
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
 }
 
 fn build_time() -> u64 {
