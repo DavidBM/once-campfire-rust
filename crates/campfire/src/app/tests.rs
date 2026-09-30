@@ -175,6 +175,15 @@ async fn whoami(c: &mut Ctx) -> Result {
     Ok(c.html(name))
 }
 
+/// An action behind the chain that answers with whether `allow_browser` kept a platform, and the
+/// browser and operating system the layout sees.
+async fn platform(c: &mut Ctx) -> Result {
+    before_actions(c, Before::default().allow_unauthenticated_access()).await?;
+    let kept = c.current::<crate::concerns::platform::ApplicationPlatform>().is_some();
+    let view = crate::concerns::platform(c).to_view();
+    Ok(c.html(format!("{kept} {:?} {:?}", view.browser, view.operating_system)))
+}
+
 fn whoami_router(app: &App) -> axum::Router {
     let kit = Kit::new(KitConfig::production(true), app.secrets.clone(), app.clock.clone(), app.clone());
     campfire_kit::app(axum::Router::new().route("/whoami", campfire_kit::get(whoami).post(campfire_kit::action(whoami))), kit)
@@ -254,6 +263,27 @@ async fn the_application_chain_blocks_banned_ips_forgeries_and_old_browsers() {
     let request = Request::get("/account/logo").header(header::HOST, "campfire.test").header(header::USER_AGENT, outdated);
     let blocked = send(&test.booted.router, request.body(Body::empty()).unwrap()).await;
     assert_eq!((blocked.status, blocked.header("cache-control"), blocked.header("etag")), (StatusCode::OK, Some("no-cache"), None));
+}
+
+#[tokio::test]
+async fn allow_browser_keeps_the_platform_it_parsed_for_the_layout() {
+    let Some(test) = boot_seeded().await else { return };
+    let app = &test.booted.app;
+    let kit = Kit::new(KitConfig::production(true), app.secrets.clone(), app.clock.clone(), app.clone());
+    let router = campfire_kit::app(axum::Router::new().route("/platform", campfire_kit::get(platform)), kit);
+
+    let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+    // Without a User-Agent to check, the layout parses the gem's default, "Mozilla/4.0 (compatible)".
+    for (user_agent, expected) in
+        [(Some(chrome), r#"true "Chrome" "Windows""#), (None, r#"false "Mozilla" """#), (Some(" "), r#"false "Mozilla" """#)]
+    {
+        let mut request = Request::get("/platform").header(header::HOST, "campfire.test");
+        if let Some(user_agent) = user_agent {
+            request = request.header(header::USER_AGENT, user_agent);
+        }
+        let reply = send(&router, request.body(Body::empty()).unwrap()).await;
+        assert_eq!((reply.status, reply.text().as_str()), (StatusCode::OK, expected), "{user_agent:?}");
+    }
 }
 
 #[tokio::test]

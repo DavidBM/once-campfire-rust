@@ -36,6 +36,8 @@
 pub mod platform;
 pub mod user_agent;
 
+use std::borrow::Cow;
+
 use campfire_db::{Ban, Membership, PasswordDigest, Room, Session, User};
 use campfire_kit::{Cookie, Ctx, Error, Result, SameSite, StatusCode, halt};
 use ruby_compat::integer_cast;
@@ -386,8 +388,17 @@ pub fn ensure_can_administer(c: &mut Ctx) -> Result<()> {
 // --- AllowBrowser --------------------------------------------------------------------------------
 
 /// `allow_browser versions: VERSIONS, block: -> { render template: "sessions/incompatible_browser" }`
+///
+/// The platform parsed for the check is kept for the layout's [`platform`], so a page parses its
+/// User-Agent once. A missing or blank one isn't checked, and is parsed only if a page renders.
 pub async fn allow_browser(c: &mut Ctx) -> Result<()> {
-    if platform::browser_blocked(c.request.user_agent()) {
+    let Some(header) = c.request.user_agent().filter(|header| user_agent::is_present(header)) else {
+        return Ok(());
+    };
+    let platform = platform::ApplicationPlatform::new(Some(header));
+    let blocked = platform.browser_blocked();
+    c.set_current(platform);
+    if blocked {
         return halt(render_incompatible_browser(c).await?);
     }
     Ok(())
@@ -429,9 +440,13 @@ async fn render_incompatible_browser(c: &mut Ctx) -> Result {
 
 // --- SetPlatform -------------------------------------------------------------------------------
 
-/// `platform` (`helper_method`): `ApplicationPlatform.new(request.user_agent)`.
-pub fn platform(c: &Ctx) -> platform::ApplicationPlatform {
-    platform::ApplicationPlatform::new(c.request.user_agent())
+/// `platform` (`helper_method`): `@platform ||= ApplicationPlatform.new(request.user_agent)`, the
+/// one [`allow_browser`] kept, or a new one when it didn't parse the header.
+pub fn platform(c: &Ctx) -> Cow<'_, platform::ApplicationPlatform> {
+    match c.current::<platform::ApplicationPlatform>() {
+        Some(platform) => Cow::Borrowed(platform),
+        None => Cow::Owned(platform::ApplicationPlatform::new(c.request.user_agent())),
+    }
 }
 
 // --- TrackedRoomVisit ----------------------------------------------------------------------------

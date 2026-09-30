@@ -114,38 +114,41 @@ fn is_windows(operating_system: &Rb<Option<String>>) -> Rb<bool> {
     Ok(operating_system.as_ref().map_err(|_| Raised)?.as_deref() == Some("Windows"))
 }
 
-/// `ActionController::AllowBrowser::BrowserBlocker#blocked?` with Campfire's
-/// `AllowBrowser::VERSIONS = { safari: 17.2, chrome: 120, firefox: 121, opera: 104, ie: false }`.
-/// Rails raises (a 500) for a versioned agent with a nil browser; that is not blocked here.
-pub fn browser_blocked(user_agent: Option<&str>) -> bool {
-    try_browser_blocked(user_agent).unwrap_or(false)
-}
+impl ApplicationPlatform {
+    /// `ActionController::AllowBrowser::BrowserBlocker#blocked?` with Campfire's
+    /// `AllowBrowser::VERSIONS = { safari: 17.2, chrome: 120, firefox: 121, opera: 104, ie: false }`.
+    /// The blocker parses the header itself; this reads the platform's parse of the same string.
+    /// Rails raises (a 500) for a versioned agent with a nil browser; that is not blocked here.
+    pub fn browser_blocked(&self) -> bool {
+        self.try_browser_blocked().unwrap_or(false)
+    }
 
-fn try_browser_blocked(user_agent: Option<&str>) -> Rb<bool> {
-    let Some(user_agent) = user_agent.filter(|ua| user_agent::is_present(ua)) else {
-        return Ok(false);
-    };
-    let agent = user_agent::parse(user_agent);
-    let Some(version) = agent.try_version()?.filter(Version::is_present) else {
-        return Ok(false);
-    };
+    fn try_browser_blocked(&self) -> Rb<bool> {
+        if !user_agent::is_present(&self.user_agent_string) {
+            return Ok(false);
+        }
+        let agent = &self.user_agent;
+        let Some(version) = agent.try_version()?.filter(Version::is_present) else {
+            return Ok(false);
+        };
 
-    let browser = agent.try_browser()?.ok_or(Raised)?.to_lowercase();
-    // `nil` means the browser isn't version-guarded; `Some(None)` is `ie: false`, always blocked.
-    let minimum = match browser.as_str() {
-        "safari" => Some(Some("17.2")),
-        "chrome" => Some(Some("120")),
-        "firefox" => Some(Some("121")),
-        "opera" => Some(Some("104")),
-        "internet explorer" => Some(None),
-        _ => None,
-    };
+        let browser = agent.try_browser()?.ok_or(Raised)?.to_lowercase();
+        // `nil` means the browser isn't version-guarded; `Some(None)` is `ie: false`, always blocked.
+        let minimum = match browser.as_str() {
+            "safari" => Some(Some("17.2")),
+            "chrome" => Some(Some("120")),
+            "firefox" => Some(Some("121")),
+            "opera" => Some(Some("104")),
+            "internet explorer" => Some(None),
+            _ => None,
+        };
 
-    let Some(minimum) = minimum else {
-        return Ok(false);
-    };
-    let below_minimum = minimum.is_none_or(|minimum| version < Version::new(minimum));
-    Ok(below_minimum && !agent.is_bot())
+        let Some(minimum) = minimum else {
+            return Ok(false);
+        };
+        let below_minimum = minimum.is_none_or(|minimum| version < Version::new(minimum));
+        Ok(below_minimum && !agent.is_bot())
+    }
 }
 
 #[cfg(test)]
@@ -207,7 +210,7 @@ mod tests {
                 failures.push(format!("{label} view: expected {expected_view}, got {view}"));
             }
 
-            check(&mut failures, &format!("{label} blocked"), &case["blocked"], try_browser_blocked(ua).map(|v| json!(v)));
+            check(&mut failures, &format!("{label} blocked"), &case["blocked"], platform.try_browser_blocked().map(|v| json!(v)));
         }
 
         assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
@@ -247,9 +250,20 @@ mod tests {
         assert!(view.desktop);
     }
 
-    /// The User-Agent work of one page request (`allow_browser`, then the layout's `platform`).
-    fn page_request(user_agent: Option<&str>) -> (bool, campfire_views::Platform) {
-        (browser_blocked(user_agent), ApplicationPlatform::new(user_agent).to_view())
+    /// `allow_browser`'s User-Agent work: it parses and checks a present header, and keeps the
+    /// platform.
+    fn allow_browser(user_agent: Option<&str>) -> Option<(bool, ApplicationPlatform)> {
+        let platform = ApplicationPlatform::new(Some(user_agent.filter(|header| user_agent::is_present(header))?));
+        Some((platform.browser_blocked(), platform))
+    }
+
+    /// The User-Agent work of one page request: `allow_browser`, then the layout's `platform`,
+    /// which reads the platform `allow_browser` kept or builds its own.
+    fn page_request(user_agent: Option<&str>) -> campfire_views::Platform {
+        match allow_browser(user_agent) {
+            Some((_, platform)) => platform.to_view(),
+            None => ApplicationPlatform::new(user_agent).to_view(),
+        }
     }
 
     /// Times the User-Agent work of a page request for a few common agents, in ns per call (the
@@ -321,7 +335,7 @@ mod tests {
                 black_box(user_agent::parse(black_box(user_agent).unwrap_or("")));
             });
             let blocked = median_ns(&|| {
-                black_box(browser_blocked(black_box(user_agent)));
+                black_box(allow_browser(black_box(user_agent)));
             });
             let new = median_ns(&|| {
                 black_box(ApplicationPlatform::new(black_box(user_agent)));
