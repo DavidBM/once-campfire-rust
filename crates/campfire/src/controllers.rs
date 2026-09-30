@@ -24,7 +24,7 @@ use std::sync::{Arc, LazyLock};
 
 use campfire_kit::{Ctx, Error, Method, Param, ParamMap, Result, StatusCode};
 use futures_util::future::BoxFuture;
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
 use crate::active_storage;
 
@@ -313,6 +313,31 @@ static ROUTES: LazyLock<Vec<Route>> = LazyLock::new(|| {
     ]
 });
 
+/// One verb's routes in table order, and a `RegexSet` of their patterns: recognition searches the
+/// path once instead of trying each route's regex in turn (86 of them for GET).
+struct VerbRoutes {
+    verb: Method,
+    routes: Vec<&'static Route>,
+    patterns: RegexSet,
+}
+
+static ROUTES_BY_VERB: LazyLock<Vec<VerbRoutes>> = LazyLock::new(|| {
+    let mut verbs: Vec<&Method> = Vec::new();
+    for route in routes() {
+        if !verbs.contains(&&route.verb) {
+            verbs.push(&route.verb);
+        }
+    }
+    verbs
+        .into_iter()
+        .map(|verb| {
+            let routes: Vec<&'static Route> = routes().iter().filter(|route| route.verb == *verb).collect();
+            let patterns = RegexSet::new(routes.iter().map(|route| route.regex.as_str())).expect("valid route patterns");
+            VerbRoutes { verb: verb.clone(), routes, patterns }
+        })
+        .collect()
+});
+
 /// The single Axum entry point: find the route, install its path params, run its action.
 pub async fn dispatch(c: &mut Ctx) -> Result {
     let path = normalize_path(c.request.path());
@@ -328,16 +353,13 @@ pub async fn dispatch(c: &mut Ctx) -> Result {
 /// (defaults, then captures, then `controller`/`action`). HEAD requests match GET routes.
 pub fn recognize(method: &Method, path: &str) -> Result<Option<(&'static Route, ParamMap)>> {
     let verb = if *method == Method::HEAD { &Method::GET } else { method };
-    for route in routes() {
-        // `captures` allocates its slots whether or not the route matches, and most don't;
-        // `is_match` doesn't, so only the route that matches pays for them.
-        if route.verb != *verb || !route.regex.is_match(path) {
-            continue;
-        }
-        let Some(captures) = route.regex.captures(path) else { continue };
-        return Ok(Some((route, path_params(route, &captures)?)));
-    }
-    Ok(None)
+    let Some(candidates) = ROUTES_BY_VERB.iter().find(|candidates| candidates.verb == *verb) else { return Ok(None) };
+    // The set's patterns are the verb's routes in table order, and it yields the ones that match
+    // in ascending order, so the first is the first route in the table that matches.
+    let Some(first) = candidates.patterns.matches(path).iter().next() else { return Ok(None) };
+    let route = candidates.routes[first];
+    let captures = route.regex.captures(path).expect("a route's regex matches wherever its pattern in the set does");
+    Ok(Some((route, path_params(route, &captures)?)))
 }
 
 /// A matched route's path parameters: its defaults, then its captures (percent-decoded), then
