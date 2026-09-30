@@ -50,3 +50,33 @@ figures are inside this host's req/s noise of ±2–3%. The HTTP A/B should ther
   rounds to 10 µs.
 - The share of `campfire::recognize` in a `bench/profile cpu` run, from
   `bench/lib/share.py cpu-<route>.folded 'recognize=;campfire::recognize(;|$)'`.
+
+## HTTP A/B
+
+Measured over HTTP alongside the other page-path branches, in
+[`hot-paths-http-20260930`](../hot-paths-http-20260930/summary.md): `main` at `0dbd10d` (the same code
+as `d93d3dd`) against `fb92455`, native release builds interleaved over 5 reps. Another project
+raised the host's load average from 5 to 16 during the run. At one client, req/s moves by up to 20%
+between reps of the same build. Medians:
+
+| Route | Clients | main req/s | branch req/s | main CPU µs/req | branch CPU µs/req | p99 main → branch |
+|---|---|---|---|---|---|---|
+| room_show | 1 | 4,922 | 4,847 (0.98×) | 196.6 | 200.1 (+3.5) | 0.28 → 0.30 ms |
+| room_show | 16 | 19,496 | 19,452 (1.00×) | 195.9 | 194.3 (-1.6) | 1.56 → 1.59 ms |
+| room_show | 64 | 19,281 | 19,410 (1.01×) | 195.9 | 194.2 (-1.7) | 5.64 → 5.60 ms |
+| messages_page | 1 | 5,503 | 5,664 (1.03×) | 179.2 | 174.1 (-5.1) | 0.27 → 0.29 ms |
+| messages_page | 16 | 22,442 | 22,365 (1.00×) | 164.4 | 163.4 (-1.0) | 1.53 → 1.50 ms |
+| messages_page | 64 | 22,514 | 22,670 (1.01×) | 164.6 | 165.6 (+1.0) | 4.84 → 4.72 ms |
+| sidebar | 1 | 4,747 | 5,537 (1.17×) | 193.0 | 174.1 (-18.9) | 0.33 → 0.28 ms |
+| sidebar | 16 | 21,485 | 21,861 (1.02×) | 169.0 | 167.8 (-1.2) | 1.57 → 1.55 ms |
+| sidebar | 64 | 22,186 | 22,857 (1.03×) | 166.6 | 163.7 (-2.9) | 5.02 → 4.81 ms |
+| search | 1 | 5,758 | 6,195 (1.08×) | 165.2 | 160.8 (-4.4) | 0.28 → 0.25 ms |
+| search | 16 | 22,490 | 22,691 (1.01×) | 161.7 | 159.7 (-2.0) | 1.50 → 1.50 ms |
+| search | 64 | 23,128 | 23,683 (1.02×) | 161.6 | 158.3 (-3.3) | 4.57 → 4.50 ms |
+| post_message | 1 | 1,856 | 1,796 (0.97×) | 551.7 | 583.3 (+31.6) | 1.83 → 1.92 ms |
+| post_message | 16 | 5,343 | 5,262 (0.98×) | 552.9 | 552.0 (-0.9) | 8.01 → 8.42 ms |
+| post_message | 64 | 5,471 | 5,392 (0.99×) | 547.4 | 550.2 (+2.8) | 19.63 → 20.61 ms |
+
+At 16 and 64 clients the page routes save 1–3 µs of CPU per request, as the in-process timing
+predicted. That is about 1% of a page, below what this host resolves in req/s. The one-client rows
+and post_message move by more than that, in both directions, between reps of the same build.
