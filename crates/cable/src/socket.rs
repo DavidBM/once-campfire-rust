@@ -9,7 +9,8 @@
 //! on its own, and a broadcast is compressed once for all of its subscribers.
 //!
 //! Only what Action Cable needs from a client is supported: text messages, fragmented or not,
-//! compressed or not, and control frames. Protocol errors close the connection.
+//! compressed or not, and control frames. Protocol errors close the connection, with the code
+//! Action Cable's websocket-driver would close it with.
 
 use std::io::{self, IoSlice};
 use std::sync::{Arc, OnceLock};
@@ -21,7 +22,8 @@ use flate2::{Compress, Compression, Decompress, FlushCompress, FlushDecompress, 
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// The largest message a client may send (Action Cable commands are a few hundred bytes).
+/// The largest message a client may send (Action Cable commands are a few hundred bytes), where
+/// websocket-driver takes up to 64 MiB (`WebSocket::Driver::MAX_LENGTH`).
 pub const MAX_MESSAGE: usize = 1 << 20;
 /// Smaller frames go out uncompressed even when compression is on: not worth a deflate stream.
 const MIN_COMPRESSED: usize = 256;
@@ -186,8 +188,54 @@ pub enum Incoming {
     Pong,
     /// A close frame, with its status code if it had one.
     Close(Option<u16>),
-    /// The client broke the protocol; the connection answers with a 1002 close.
-    Invalid,
+}
+
+/// Why a [`Reader`] stopped.
+#[derive(Debug)]
+pub enum ReadError {
+    /// Reading the socket failed, or the client went away.
+    Io(io::Error),
+    /// The client broke the protocol: the connection closes with `code`, the one websocket-driver
+    /// (under Action Cable) closes with for the same failure.
+    Protocol { code: u16 },
+}
+
+impl From<io::Error> for ReadError {
+    fn from(error: io::Error) -> Self {
+        ReadError::Io(error)
+    }
+}
+
+// websocket-driver's codes for what a client can get wrong (`WebSocket::Driver::Hybi::ERRORS`).
+
+/// Anything not covered below.
+pub const PROTOCOL_ERROR: u16 = 1002;
+/// An unmasked frame.
+pub const UNACCEPTABLE: u16 = 1003;
+/// A text message that isn't UTF-8.
+pub const ENCODING_ERROR: u16 = 1007;
+/// A message over [`MAX_MESSAGE`].
+pub const TOO_LARGE: u16 = 1009;
+
+fn fail<T>(code: u16) -> Result<T, ReadError> {
+    Err(ReadError::Protocol { code })
+}
+
+/// A frame's header.
+struct Header {
+    fin: bool,
+    /// RSV1: the message this frame starts is compressed.
+    compressed: bool,
+    opcode: u8,
+    len: u64,
+    mask: [u8; 4],
+}
+
+/// A fragmented message so far.
+struct Partial {
+    opcode: u8,
+    compressed: bool,
+    data: Vec<u8>,
 }
 
 /// Reads client frames. It keeps no buffer between messages: frames are read header first, then
@@ -195,9 +243,8 @@ pub enum Incoming {
 pub struct Reader<R> {
     io: R,
     deflate: bool,
-    /// A fragmented message so far (opcode, compressed, data), kept across control frames that
-    /// arrive between its fragments.
-    partial: Option<(u8, bool, Vec<u8>)>,
+    /// Kept across the control frames that may arrive between a message's fragments.
+    partial: Option<Partial>,
 }
 
 impl<R: AsyncRead + Unpin> Reader<R> {
@@ -206,89 +253,104 @@ impl<R: AsyncRead + Unpin> Reader<R> {
     }
 
     /// The next message or control frame, reassembling fragments and decompressing.
-    pub async fn next(&mut self) -> io::Result<Incoming> {
+    pub async fn next(&mut self) -> Result<Incoming, ReadError> {
         loop {
-            let (fin, rsv1, opcode, payload) = self.frame().await?;
-            match opcode {
+            let header = self.header().await?;
+            let payload = self.payload(&header).await?;
+            match header.opcode {
                 OP_CLOSE => return close_code(&payload).map(Incoming::Close),
                 OP_PING => return Ok(Incoming::Ping(payload)),
                 OP_PONG => return Ok(Incoming::Pong),
-                OP_TEXT | OP_BINARY if self.partial.is_none() => self.partial = Some((opcode, rsv1, payload)),
-                OP_CONTINUATION if !rsv1 => match self.partial.as_mut() {
-                    Some((_, _, data)) if data.len() + payload.len() <= MAX_MESSAGE => data.extend_from_slice(&payload),
-                    Some(_) => return Err(protocol_error("message too big")),
-                    None => return Err(protocol_error("continuation without a message")),
+                OP_TEXT | OP_BINARY => self.partial = Some(Partial { opcode: header.opcode, compressed: header.compressed, data: payload }),
+                _ => match &mut self.partial {
+                    Some(partial) => partial.data.extend_from_slice(&payload),
+                    None => return fail(PROTOCOL_ERROR), // a continuation of nothing
                 },
-                _ => return Err(protocol_error("unexpected frame")),
             }
-            if fin {
-                let (opcode, compressed, data) = self.partial.take().expect("a message was started");
-                if compressed && !self.deflate {
-                    return Err(protocol_error("compressed frame without the extension"));
-                }
+            if header.fin {
+                let Partial { opcode, compressed, data } = self.partial.take().expect("a message was started");
                 let data = if compressed { inflate(&data)? } else { data };
-                return Ok(match opcode {
-                    OP_TEXT => Incoming::Text(String::from_utf8(data).map_err(|_| protocol_error("invalid UTF-8"))?),
-                    _ => Incoming::Binary,
-                });
+                return match opcode {
+                    OP_TEXT => String::from_utf8(data).map(Incoming::Text).or_else(|_| fail(ENCODING_ERROR)),
+                    _ => Ok(Incoming::Binary),
+                };
             }
         }
     }
 
-    /// One frame: FIN, RSV1, opcode and the unmasked payload.
-    async fn frame(&mut self) -> io::Result<(bool, bool, u8, Vec<u8>)> {
+    /// A frame's header, checked in the order websocket-driver checks it (`Hybi#parse_opcode`,
+    /// `#parse_length`, `#check_frame_length`), which decides the close code when a frame is wrong
+    /// in more than one way.
+    async fn header(&mut self) -> Result<Header, ReadError> {
         let mut head = [0u8; 2];
         self.io.read_exact(&mut head).await?;
-        let (fin, rsv1, opcode) = (head[0] & 0x80 != 0, head[0] & 0x40 != 0, head[0] & 0x0f);
-        if head[0] & 0x30 != 0 {
-            return Err(protocol_error("reserved bits set"));
+        let (fin, compressed, opcode) = (head[0] & 0x80 != 0, head[0] & 0x40 != 0, head[0] & 0x0f);
+        let control = opcode >= 0x8;
+        // RSV1 may only start a message, and only with compression negotiated.
+        let reserved = head[0] & 0x30 != 0 || (compressed && !(self.deflate && matches!(opcode, OP_TEXT | OP_BINARY)));
+        let known = matches!(opcode, OP_CONTINUATION | OP_TEXT | OP_BINARY | OP_CLOSE | OP_PING | OP_PONG);
+        let interrupts_a_message = matches!(opcode, OP_TEXT | OP_BINARY) && self.partial.is_some();
+        if reserved || !known || (control && !fin) || interrupts_a_message {
+            return fail(PROTOCOL_ERROR);
         }
         if head[1] & 0x80 == 0 {
-            return Err(protocol_error("client frames must be masked"));
+            return fail(UNACCEPTABLE);
         }
         let len = match head[1] & 0x7f {
             126 => self.io.read_u16().await? as u64,
             127 => self.io.read_u64().await?,
             len => len as u64,
         };
-        let control = opcode >= 0x8;
-        if (control && (len > 125 || !fin || rsv1)) || len > MAX_MESSAGE as u64 {
-            return Err(protocol_error("bad frame length"));
+        if control && len > 125 {
+            return fail(PROTOCOL_ERROR);
+        }
+        let so_far = match &self.partial {
+            Some(partial) if !control => partial.data.len() as u64,
+            _ => 0,
+        };
+        if so_far.saturating_add(len) > MAX_MESSAGE as u64 {
+            return fail(TOO_LARGE);
         }
         let mut mask = [0u8; 4];
         self.io.read_exact(&mut mask).await?;
-        // Grown as bytes arrive rather than allocated from the header's claim, so a client can't
-        // make the server hold a megabyte per socket by announcing a frame it never sends.
+        Ok(Header { fin, compressed, opcode, len, mask })
+    }
+
+    /// A frame's payload, unmasked. It's grown as bytes arrive rather than allocated from the
+    /// header's claim, so a client can't make the server hold a megabyte per socket by announcing a
+    /// frame it never sends.
+    async fn payload(&mut self, header: &Header) -> io::Result<Vec<u8>> {
         let mut payload = Vec::new();
-        (&mut self.io).take(len).read_to_end(&mut payload).await?;
-        if payload.len() as u64 != len {
+        (&mut self.io).take(header.len).read_to_end(&mut payload).await?;
+        if payload.len() as u64 != header.len {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         for (i, byte) in payload.iter_mut().enumerate() {
-            *byte ^= mask[i % 4];
+            *byte ^= header.mask[i % 4];
         }
-        Ok((fin, rsv1, opcode, payload))
+        Ok(payload)
     }
 }
 
 /// A close frame's status code (RFC 6455 §5.5.1, §7.4): no payload, or a code a peer may send
 /// followed by a UTF-8 reason.
-fn close_code(payload: &[u8]) -> io::Result<Option<u16>> {
+fn close_code(payload: &[u8]) -> Result<Option<u16>, ReadError> {
     match payload {
         [] => Ok(None),
-        [_] => Err(protocol_error("one-byte close payload")),
+        [_] => fail(PROTOCOL_ERROR),
         [high, low, reason @ ..] => {
             let code = u16::from_be_bytes([*high, *low]);
-            if !matches!(code, 1000..=1003 | 1007..=1014 | 3000..=4999) {
-                return Err(protocol_error("invalid close code"));
+            if !matches!(code, 1000..=1003 | 1007..=1014 | 3000..=4999) || std::str::from_utf8(reason).is_err() {
+                return fail(PROTOCOL_ERROR);
             }
-            std::str::from_utf8(reason).map_err(|_| protocol_error("close reason isn't UTF-8"))?;
             Ok(Some(code))
         }
     }
 }
 
-fn inflate(data: &[u8]) -> io::Result<Vec<u8>> {
+/// A compressed message's text. Invalid deflate data is a protocol error: Action Cable doesn't
+/// negotiate compression, so there's no websocket-driver code to match.
+fn inflate(data: &[u8]) -> Result<Vec<u8>, ReadError> {
     let mut decompress = Decompress::new(false);
     let input = [data, &DEFLATE_TAIL[..]].concat();
     let mut out = Vec::with_capacity(data.len() * 4 + 64);
@@ -297,21 +359,17 @@ fn inflate(data: &[u8]) -> io::Result<Vec<u8>> {
             out.reserve(out.capacity());
         }
         let consumed = decompress.total_in() as usize;
-        let status = decompress
-            .decompress_vec(&input[consumed..], &mut out, FlushDecompress::Sync)
-            .map_err(|_| protocol_error("invalid deflate data"))?;
+        let Ok(status) = decompress.decompress_vec(&input[consumed..], &mut out, FlushDecompress::Sync) else {
+            return fail(PROTOCOL_ERROR);
+        };
         if out.len() > MAX_MESSAGE {
-            return Err(protocol_error("message too big"));
+            return fail(TOO_LARGE);
         }
         let done = decompress.total_in() as usize == input.len() && out.len() < out.capacity();
         if done || status == Status::StreamEnd {
             return Ok(out);
         }
     }
-}
-
-fn protocol_error(message: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
 // --- Writing -----------------------------------------------------------------------------------
@@ -442,12 +500,12 @@ mod tests {
         deflate(text.as_bytes()).into_vec()
     }
 
-    async fn read_all(bytes: Vec<u8>, deflate: bool) -> Vec<io::Result<Incoming>> {
+    async fn read_all(bytes: Vec<u8>, deflate: bool) -> Vec<Result<Incoming, ReadError>> {
         let mut reader = Reader::new(&bytes[..], deflate);
         let mut out = Vec::new();
         loop {
             match reader.next().await {
-                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return out,
+                Err(ReadError::Io(error)) if error.kind() == io::ErrorKind::UnexpectedEof => return out,
                 result => {
                     let stop = result.is_err();
                     out.push(result);
@@ -480,25 +538,60 @@ mod tests {
         );
     }
 
+    /// Each closes with websocket-driver's code for it.
     #[tokio::test]
     async fn rejects_protocol_errors() {
-        let unmasked = vec![0x81, 0x02, b'h', b'i'];
+        let half = vec![b'a'; MAX_MESSAGE / 2 + 1];
         let cases = [
-            unmasked,
-            client_frame(OP_TEXT, true, true, &deflated("hi")), // compressed, not negotiated
-            client_frame(OP_TEXT, true, false, &[0xff, 0xfe]),  // not UTF-8
-            client_frame(OP_CONTINUATION, true, false, b"x"),   // nothing to continue
-            client_frame(OP_PING, false, false, b"x"),          // fragmented control frame
-            client_frame(0x3, true, false, b"x"),               // reserved opcode
-            client_frame(OP_TEXT, true, false, &vec![b'a'; MAX_MESSAGE + 1]),
-            client_frame(OP_CLOSE, true, false, &[0x03]),                // one-byte close
-            client_frame(OP_CLOSE, true, false, &1005u16.to_be_bytes()), // reserved code
-            client_frame(OP_CLOSE, true, false, &[0x03, 0xe8, 0xff]),    // reason not UTF-8
+            ("unmasked", vec![0x81, 0x02, b'h', b'i'], false, UNACCEPTABLE),
+            ("unmasked, with a reserved opcode", vec![0x83, 0x01, b'x'], false, PROTOCOL_ERROR),
+            ("compressed, not negotiated", client_frame(OP_TEXT, true, true, &deflated("hi")), false, PROTOCOL_ERROR),
+            (
+                "compressed continuation",
+                [client_frame(OP_TEXT, false, true, b""), client_frame(OP_CONTINUATION, true, true, b"")].concat(),
+                true,
+                PROTOCOL_ERROR,
+            ),
+            ("compressed ping", client_frame(OP_PING, true, true, b"x"), true, PROTOCOL_ERROR),
+            ("invalid deflate data", client_frame(OP_TEXT, true, true, &[0xff; 8]), true, PROTOCOL_ERROR),
+            ("not UTF-8", client_frame(OP_TEXT, true, false, &[0xff, 0xfe]), false, ENCODING_ERROR),
+            ("nothing to continue", client_frame(OP_CONTINUATION, true, false, b"x"), false, PROTOCOL_ERROR),
+            (
+                "a new message mid-message",
+                [client_frame(OP_TEXT, false, false, b"x"), client_frame(OP_TEXT, true, false, b"y")].concat(),
+                false,
+                PROTOCOL_ERROR,
+            ),
+            ("fragmented control frame", client_frame(OP_PING, false, false, b"x"), false, PROTOCOL_ERROR),
+            ("long control frame", client_frame(OP_PING, true, false, &[0; 126]), false, PROTOCOL_ERROR),
+            ("reserved opcode", client_frame(0x3, true, false, b"x"), false, PROTOCOL_ERROR),
+            ("too large", client_frame(OP_TEXT, true, false, &vec![b'a'; MAX_MESSAGE + 1]), false, TOO_LARGE),
+            (
+                "too large in fragments",
+                [client_frame(OP_TEXT, false, false, &half), client_frame(OP_CONTINUATION, true, false, &half)].concat(),
+                false,
+                TOO_LARGE,
+            ),
+            ("too large once inflated", client_frame(OP_TEXT, true, true, &deflated(&"a".repeat(MAX_MESSAGE + 1))), true, TOO_LARGE),
+            ("one-byte close", client_frame(OP_CLOSE, true, false, &[0x03]), false, PROTOCOL_ERROR),
+            ("reserved close code", client_frame(OP_CLOSE, true, false, &1005u16.to_be_bytes()), false, PROTOCOL_ERROR),
+            ("close reason not UTF-8", client_frame(OP_CLOSE, true, false, &[0x03, 0xe8, 0xff]), false, PROTOCOL_ERROR),
         ];
-        for bytes in cases {
-            let read = read_all(bytes, false).await;
-            assert!(read.last().unwrap().as_ref().is_err_and(|e| e.kind() == io::ErrorKind::InvalidData), "{read:?}");
+        for (case, bytes, deflate, code) in cases {
+            let read = read_all(bytes, deflate).await;
+            assert!(matches!(read.last(), Some(Err(ReadError::Protocol { code: closed })) if *closed == code), "{case}: {read:?}");
         }
+    }
+
+    /// A fragment that would make its message too large is refused from its header, before its
+    /// payload is read.
+    #[tokio::test]
+    async fn refuses_a_too_large_fragment_from_its_header() {
+        let half = vec![b'a'; MAX_MESSAGE / 2 + 1];
+        let mut bytes = [client_frame(OP_TEXT, false, false, &half), client_frame(OP_CONTINUATION, true, false, &half)].concat();
+        bytes.truncate(bytes.len() - half.len());
+        let read = read_all(bytes, false).await;
+        assert!(matches!(read.last(), Some(Err(ReadError::Protocol { code: TOO_LARGE }))), "{read:?}");
     }
 
     #[tokio::test]
