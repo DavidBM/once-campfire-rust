@@ -71,24 +71,26 @@ The raw `cpu_ms_per_req` in the per-run JSON has four decimals.
 
 ## Output unchanged
 
-- The gem-generated vectors (`vectors/campfire_user_agents.json`, 258 agents) pass. They cover the
-  parse, the `ApplicationPlatform` predicates, the whole view (false or "" where Ruby raises) and
-  `blocked`.
-- New equivalence tests check the fast paths against the code they replaced. They run over the
-  vectors' agents plus a new corpus of 137 real-world agents in
-  `crates/campfire/src/concerns/user_agent/corpus.rs`. The corpus has desktop and mobile Chrome,
-  Safari, Firefox, Edge, Opera, Samsung Internet, in-app browsers, bots, HTTP clients, blank,
-  malformed and non-ASCII strings, including a U+212A Kelvin sign that lowercases to ASCII.
+- The gem-generated vectors (`vectors/campfire_user_agents.json`) pass for all 385 agents. They
+  cover the parse, the `ApplicationPlatform` predicates, the whole view (false or "" where Ruby
+  raises) and `blocked`. This work appended 127 agents to `reference-tools/campfire/user_agents.rb`
+  and regenerated the vectors with useragent 0.16.11 in the reference image; the 258 agents already
+  there came out unchanged. The new agents are desktop and mobile Chrome, Safari, Firefox, Edge,
+  Opera, Samsung Internet, in-app browsers, bots, HTTP clients, and blank, malformed and non-ASCII
+  strings, including a U+212A Kelvin sign that lowercases to ASCII and a comma before a comment.
+- New equivalence tests check the fast paths against the code they replaced, over every agent in
+  the vectors:
   - The old char-by-char matcher, over every prefix of every agent.
   - Lowercase-then-compare and lowercase-then-contains, over every product name and comment.
   - The old WebKit comment matcher, over every suffix.
-  - The view against each predicate asked on its own.
 - A seed-backed test checks that the platform `allow_browser` parsed is the one the layout reads,
-  and that a missing or blank header is left to the layout.
-- A snapshot of every answer for all 395 agents was taken before the first change and diffed after
-  each commit. It covered the products, `browser`, `version`, `platform`, `os`, `bot?`, `mobile?`,
-  each predicate, the view and `blocked`. Every diff was identical, apart from `Version`'s `Debug`
-  losing its segments in the last commit. The snapshot test itself isn't committed.
+  that a missing or blank header is left to the layout, and that an action which skips the
+  before-actions still gets the header's platform.
+- Before the new agents were in the vectors, a snapshot of every answer for them and the vectors'
+  agents was taken before the first change and diffed after each commit. It covered the products,
+  `browser`, `version`, `platform`, `os`, `bot?`, `mobile?`, each predicate, the view and
+  `blocked`. Every diff was identical, apart from `Version`'s `Debug` losing its segments in the
+  last commit. The vectors now pin those answers, so the snapshot test isn't committed.
 
 ## HTTP A/B
 

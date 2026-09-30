@@ -1063,9 +1063,6 @@ fn webkit_build_version(build: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-pub(crate) mod corpus;
-
-#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use serde_json::{Value, json};
@@ -1150,13 +1147,9 @@ pub(crate) mod tests {
         assert_eq!(agent.version().to_string(), "4.0");
     }
 
-    /// Every User-Agent the tests know: the gem vectors' and the real-world corpus.
-    pub(crate) fn user_agents() -> Vec<Option<String>> {
-        let vectors = vectors();
-        let mut user_agents: Vec<Option<String>> =
-            vectors["user_agents"].as_array().unwrap().iter().map(|case| case["ua"].as_str().map(String::from)).collect();
-        user_agents.extend(corpus::USER_AGENTS.iter().map(|ua| Some(ua.to_string())));
-        user_agents
+    /// Every User-Agent in the vectors: the corpus in reference-tools/campfire/user_agents.rb.
+    fn user_agents() -> Vec<Option<String>> {
+        vectors()["user_agents"].as_array().unwrap().iter().map(|case| case["ua"].as_str().map(String::from)).collect()
     }
 
     /// The straightforward code the fast paths replaced, kept to check them against.

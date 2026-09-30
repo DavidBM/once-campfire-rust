@@ -154,7 +154,7 @@ impl ApplicationPlatform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::concerns::user_agent::tests::{check, user_agents, vectors};
+    use crate::concerns::user_agent::tests::{check, vectors};
     use serde_json::json;
 
     #[test]
@@ -214,32 +214,6 @@ mod tests {
         }
 
         assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
-    }
-
-    /// `to_view` works out `browser` and `operating_system` once for all the predicates: the same
-    /// view as asking each predicate on its own.
-    #[test]
-    fn view_matches_the_predicates_asked_one_by_one() {
-        for user_agent in user_agents() {
-            let platform = ApplicationPlatform::new(user_agent.as_deref());
-            let browser_is = |names: &[&str]| browser_matches(&platform.user_agent.try_browser(), names).unwrap_or(false);
-            let one_by_one = campfire_views::Platform {
-                ios: platform.ios(),
-                android: platform.android(),
-                mac: platform.mac(),
-                windows: is_windows(&platform.try_operating_system()).unwrap_or(false),
-                chrome: browser_is(CHROME),
-                firefox: browser_is(FIREFOX),
-                safari: browser_is(SAFARI),
-                edge: browser_is(EDGE),
-                mobile: platform.mobile(),
-                desktop: platform.desktop(),
-                apple_messages: platform.apple_messages(),
-                browser: platform.user_agent.browser(),
-                operating_system: platform.try_operating_system().ok().flatten().unwrap_or_default(),
-            };
-            assert_eq!(format!("{:?}", platform.to_view()), format!("{one_by_one:?}"), "{user_agent:?}");
-        }
     }
 
     #[test]
