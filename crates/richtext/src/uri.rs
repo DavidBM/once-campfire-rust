@@ -246,7 +246,8 @@ fn split_absolute(value: &str) -> Option<Uri> {
     if s.get(i) != Some(&b':') {
         return None;
     }
-    let scheme = value[..i].to_string();
+    // `URI::Generic#set_scheme` downcases it.
+    let scheme = value[..i].to_ascii_lowercase();
     let rest_start = i + 1;
     let tail = parse_query_fragment_positions(s, rest_start)?;
     let hier = &s[rest_start..tail.hier_end];
@@ -399,5 +400,14 @@ mod tests {
         assert_eq!(parse("mailto:foo"), Err(UriError::InvalidComponent));
         assert!(parse("mailto:a@b.com").is_ok());
         assert_eq!(parse("https://x.com:443/a").unwrap().to_s(), "https://x.com/a");
+    }
+
+    #[test]
+    fn downcases_the_scheme_like_ruby() {
+        // `URI.parse(s)` in the reference: `scheme=` downcases.
+        assert_eq!(parse("HTTPS://x.com/a").unwrap().scheme.as_deref(), Some("https"));
+        assert_eq!(parse("HTTP://X.com:80/a").unwrap().to_s(), "http://X.com/a");
+        assert_eq!(parse("FILE:///etc").unwrap().to_s(), "file:///etc");
+        assert_eq!(parse("MailTo:a@b.com").unwrap().to_s(), "mailto:a@b.com");
     }
 }
