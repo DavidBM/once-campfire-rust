@@ -57,3 +57,35 @@ Medians of 3 runs, in requests/s, with the change against the base. Each column 
 The largest changes are at 64 clients, on room_show, messages_page, sidebar and search. search also changes at 1 and 16 clients. post_message changes only at 16 and 64 clients, through its reads.
 
 The real server's thread count also includes the cable connections runtime (one worker per CPU) and any Web Push threads. Expect about 20–25 threads under load rather than 14–15: still a fixed count, and about 5× fewer than on the base.
+
+## HTTP A/B
+
+Measured over HTTP alongside the other page-path branches, in
+[`hot-paths-http-20260930`](../hot-paths-http-20260930/summary.md): `main` at `0dbd10d` (the same code
+as `d93d3dd`) against `6517414`, native release builds interleaved over 5 reps. Another project
+raised the host's load average from 5 to 16 during the run. At one client, req/s moves by up to 20%
+between reps of the same build. Medians:
+
+| Route | Clients | main req/s | branch req/s | main CPU µs/req | branch CPU µs/req | p99 main → branch |
+|---|---|---|---|---|---|---|
+| room_show | 1 | 4,922 | 4,974 (1.01×) | 196.6 | 189.7 (-6.9) | 0.28 → 0.31 ms |
+| room_show | 16 | 19,496 | 20,330 (1.04×) | 195.9 | 176.9 (-19.0) | 1.56 → 1.53 ms |
+| room_show | 64 | 19,281 | 22,308 (1.16×) | 195.9 | 170.2 (-25.7) | 5.64 → 5.06 ms |
+| messages_page | 1 | 5,503 | 5,841 (1.06×) | 179.2 | 162.4 (-16.8) | 0.27 → 0.26 ms |
+| messages_page | 16 | 22,442 | 25,138 (1.12×) | 164.4 | 145.2 (-19.2) | 1.53 → 1.24 ms |
+| messages_page | 64 | 22,514 | 27,574 (1.22×) | 164.6 | 135.7 (-28.9) | 4.84 → 4.12 ms |
+| sidebar | 1 | 4,747 | 5,400 (1.14×) | 193.0 | 166.3 (-26.7) | 0.33 → 0.30 ms |
+| sidebar | 16 | 21,485 | 23,801 (1.11×) | 169.0 | 147.3 (-21.7) | 1.57 → 1.40 ms |
+| sidebar | 64 | 22,186 | 27,024 (1.22×) | 166.6 | 137.8 (-28.8) | 5.02 → 4.29 ms |
+| search | 1 | 5,758 | 6,957 (1.21×) | 165.2 | 136.0 (-29.2) | 0.28 → 0.23 ms |
+| search | 16 | 22,490 | 26,612 (1.18×) | 161.7 | 127.5 (-34.2) | 1.50 → 1.24 ms |
+| search | 64 | 23,128 | 31,991 (1.38×) | 161.6 | 115.6 (-46.0) | 4.57 → 3.58 ms |
+| post_message | 1 | 1,856 | 2,006 (1.08×) | 551.7 | 521.5 (-30.2) | 1.83 → 1.92 ms |
+| post_message | 16 | 5,343 | 5,618 (1.05×) | 552.9 | 454.4 (-98.5) | 8.01 → 8.14 ms |
+| post_message | 64 | 5,471 | 6,279 (1.15×) | 547.4 | 444.4 (-103.0) | 19.63 → 16.88 ms |
+
+Over HTTP, with the front server and gzip, every read route saves 19–46 µs of CPU per request at
+16 and 64 clients. Throughput is up 4–38%: search 1.18× and 1.38×, messages_page and sidebar 1.22×
+at 64 clients. post_message saves about 100 µs of CPU per request at 16 and 64 clients. These are
+close to the in-process route timings above: the largest changes are at 64 clients and on search.
+Thread counts weren't sampled in this run.
