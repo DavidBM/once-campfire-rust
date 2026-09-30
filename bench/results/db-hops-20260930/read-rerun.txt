@@ -1,0 +1,60 @@
+== read-base rep 1 08:37:01 load 7.24
+c=1       181102 reads/s  p50     5.2 µs  p99      7.7 µs  cpu  6.75 µs/read  peak threads 148
+c=16      794863 reads/s  p50    11.2 µs  p99    212.1 µs  cpu  4.93 µs/read  peak threads 171
+c=64      753422 reads/s  p50    57.8 µs  p99    666.2 µs  cpu  5.25 µs/read  peak threads 294
+== read-semaphore rep 1 08:37:11 load 10.64
+c=1       182312 reads/s  p50     5.3 µs  p99      7.8 µs  cpu  6.65 µs/read  peak threads 43
+c=16      633379 reads/s  p50    22.6 µs  p99     66.5 µs  cpu  5.75 µs/read  peak threads 55
+c=64      635651 reads/s  p50    98.6 µs  p99    146.1 µs  cpu  5.72 µs/read  peak threads 55
+== read-aa04095 rep 1 08:37:21 load 10.99
+c=1       213090 reads/s  p50     4.5 µs  p99      6.6 µs  cpu  5.72 µs/read  peak threads 13
+c=16     1902737 reads/s  p50     6.9 µs  p99     19.2 µs  cpu  2.05 µs/read  peak threads 13
+c=64     1914776 reads/s  p50    30.9 µs  p99     69.5 µs  cpu  2.04 µs/read  peak threads 13
+== read-base rep 2 08:37:30 load 10.60
+c=1       181199 reads/s  p50     5.2 µs  p99      7.9 µs  cpu  6.71 µs/read  peak threads 146
+c=16      799307 reads/s  p50    11.5 µs  p99    202.1 µs  cpu  4.91 µs/read  peak threads 188
+c=64      746880 reads/s  p50    57.4 µs  p99    697.9 µs  cpu  5.29 µs/read  peak threads 342
+== read-semaphore rep 2 08:37:40 load 14.52
+c=1       177277 reads/s  p50     5.4 µs  p99      8.3 µs  cpu  6.93 µs/read  peak threads 44
+c=16      619778 reads/s  p50    23.2 µs  p99     67.1 µs  cpu  5.88 µs/read  peak threads 55
+c=64      609685 reads/s  p50   101.8 µs  p99    158.5 µs  cpu  5.94 µs/read  peak threads 67
+== read-aa04095 rep 2 08:37:50 load 13.54
+c=1       188689 reads/s  p50     4.8 µs  p99      8.9 µs  cpu  6.28 µs/read  peak threads 13
+c=16     1782048 reads/s  p50     7.2 µs  p99     21.9 µs  cpu  2.16 µs/read  peak threads 13
+c=64     1830794 reads/s  p50    31.6 µs  p99     75.3 µs  cpu  2.11 µs/read  peak threads 13
+== read-base rep 3 08:38:00 load 13.71
+c=1       177125 reads/s  p50     5.4 µs  p99      8.7 µs  cpu  6.86 µs/read  peak threads 164
+c=16      782796 reads/s  p50    11.3 µs  p99    222.7 µs  cpu  5.00 µs/read  peak threads 182
+c=64      732119 reads/s  p50    58.8 µs  p99    701.2 µs  cpu  5.38 µs/read  peak threads 331
+== read-semaphore rep 3 08:38:09 load 14.77
+c=1       174054 reads/s  p50     5.5 µs  p99      8.8 µs  cpu  7.01 µs/read  peak threads 54
+c=16      628399 reads/s  p50    22.7 µs  p99     67.9 µs  cpu  5.79 µs/read  peak threads 62
+c=64      627150 reads/s  p50   100.0 µs  p99    147.2 µs  cpu  5.81 µs/read  peak threads 62
+== read-aa04095 rep 3 08:38:19 load 14.48
+c=1       207929 reads/s  p50     4.6 µs  p99      6.9 µs  cpu  5.83 µs/read  peak threads 13
+c=16     1861882 reads/s  p50     7.0 µs  p99     20.4 µs  cpu  2.08 µs/read  peak threads 13
+c=64     1906544 reads/s  p50    30.7 µs  p99     71.9 µs  cpu  2.04 µs/read  peak threads 13
+== read-base rep 4 08:38:29 load 13.35
+c=1       177221 reads/s  p50     5.4 µs  p99      8.4 µs  cpu  6.88 µs/read  peak threads 169
+c=16      800534 reads/s  p50    11.1 µs  p99    214.2 µs  cpu  4.89 µs/read  peak threads 203
+c=64      756172 reads/s  p50    56.6 µs  p99    697.1 µs  cpu  5.23 µs/read  peak threads 332
+== read-semaphore rep 4 08:38:38 load 17.52
+c=1       185280 reads/s  p50     5.1 µs  p99      7.7 µs  cpu  6.62 µs/read  peak threads 47
+c=16      636940 reads/s  p50    22.4 µs  p99     66.6 µs  cpu  5.71 µs/read  peak threads 50
+c=64      635170 reads/s  p50    98.6 µs  p99    145.5 µs  cpu  5.72 µs/read  peak threads 55
+== read-aa04095 rep 4 08:38:48 load 16.49
+c=1       194870 reads/s  p50     4.7 µs  p99      9.4 µs  cpu  6.04 µs/read  peak threads 13
+c=16     1880591 reads/s  p50     6.9 µs  p99     19.6 µs  cpu  2.07 µs/read  peak threads 13
+c=64     1874543 reads/s  p50    31.3 µs  p99     72.2 µs  cpu  2.07 µs/read  peak threads 13
+== read-base rep 5 08:38:58 load 15.21
+c=1       178194 reads/s  p50     5.3 µs  p99      8.7 µs  cpu  6.77 µs/read  peak threads 167
+c=16      791517 reads/s  p50    10.9 µs  p99    227.9 µs  cpu  4.95 µs/read  peak threads 176
+c=64      744115 reads/s  p50    58.7 µs  p99    676.5 µs  cpu  5.31 µs/read  peak threads 335
+== read-semaphore rep 5 08:39:07 load 15.89
+c=1       181084 reads/s  p50     5.3 µs  p99      8.2 µs  cpu  6.71 µs/read  peak threads 46
+c=16      626824 reads/s  p50    22.8 µs  p99     67.5 µs  cpu  5.81 µs/read  peak threads 50
+c=64      620508 reads/s  p50   101.0 µs  p99    150.5 µs  cpu  5.87 µs/read  peak threads 61
+== read-aa04095 rep 5 08:39:17 load 14.78
+c=1       206069 reads/s  p50     4.6 µs  p99      7.2 µs  cpu  5.87 µs/read  peak threads 13
+c=16     1863129 reads/s  p50     7.0 µs  p99     19.8 µs  cpu  2.09 µs/read  peak threads 13
+c=64     1890178 reads/s  p50    31.2 µs  p99     71.8 µs  cpu  2.06 µs/read  peak threads 13
