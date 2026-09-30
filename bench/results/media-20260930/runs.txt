@@ -1,0 +1,88 @@
+# timing.rs (copied into crates/storage/examples/, cargo run --release), rustc 1.98.1, AMD Ryzen AI
+# MAX+ 395 (32 threads), Linux 7.2.5, ffmpeg n9.0.2. The clips (two-second testsrc2), the files to
+# stage (pseudo-random) and the storage root are on btrfs. Each line below is the median of 21 runs
+# (11 for 100 MB). The three builds ran interleaved, three times, while other agents were compiling
+# (load average 10-12).
+# before: d93d3dd   poll: 5cb64af (5 ms poll cap)   after: ba03155 (5 ms poll cap, one MD5 pass).
+# ba03155 is an earlier draft of 1b449ad ("Read and hash a staged upload once"); only a doc
+# comment and the commit message differ, so the code measured is the same.
+#
+# Medians of the three runs:
+#                     output()   output_within before   output_within after (poll, after)
+# preview 320x240      32.9 ms        63.5 ms                32.6 ms, 32.6 ms
+# preview 1080p        77.1 ms       113.6 ms                78.1 ms, 73.2 ms
+# ffprobe 320x240      26.5 ms        31.4 ms                27.6 ms, 27.7 ms
+# ffprobe 1080p        31.2 ms        31.5 ms (63.4 once)    32.6 ms, 32.6 ms
+# The old pause (1, 2, 4 ... 32 ms, then 50 ms) checks at 31, 63 and 113 ms, so the result depends
+# on which side of a check the child exits; with the 5 ms cap it is within 5 ms of output(). The
+# reference's fixture video alpha-centuri.mov previews in about 30 ms and probes in about 25 ms.
+#
+#                     stage_file before   stage_file after   one MD5 pass
+# 10 MB                  28.0 ms             13.7 ms           13.5 ms
+# 100 MB                278.5 ms            136.4 ms          135.7 ms
+# On btrfs copy_file_range reflinks, so the copy is nearly free; where the kernel copies the data
+# (ext4, or the tempfile on another filesystem) that time is the same before and after. MD5 runs
+# at about 740 MB/s, so the saving is about 1.35 ms per MB uploaded (0.7 ms for a 505 KB JPEG).
+== before rep 1 load 10.87 10.04 7.83
+preview small: output() 30.5 ms, output_within 31.4 ms
+ffprobe small: output() 23.3 ms, output_within 31.4 ms
+preview 1080p: output() 71.5 ms, output_within 113.6 ms
+ffprobe 1080p: output() 29.5 ms, output_within 31.5 ms
+10 MB: stage_file 27.6 ms, one MD5 pass 13.5 ms
+100 MB: stage_file 277.6 ms, one MD5 pass 134.3 ms
+== poll rep 1 load 11.16 10.14 7.90
+preview small: output() 34.2 ms, output_within 37.7 ms
+ffprobe small: output() 26.6 ms, output_within 27.6 ms
+preview 1080p: output() 76.0 ms, output_within 78.2 ms
+ffprobe 1080p: output() 30.9 ms, output_within 32.6 ms
+10 MB: stage_file 28.0 ms, one MD5 pass 13.6 ms
+100 MB: stage_file 281.4 ms, one MD5 pass 135.5 ms
+== after rep 1 load 11.73 10.30 7.97
+preview small: output() 35.5 ms, output_within 37.7 ms
+ffprobe small: output() 29.7 ms, output_within 32.7 ms
+preview 1080p: output() 75.5 ms, output_within 78.2 ms
+ffprobe 1080p: output() 30.8 ms, output_within 32.6 ms
+10 MB: stage_file 13.7 ms, one MD5 pass 13.5 ms
+100 MB: stage_file 136.7 ms, one MD5 pass 136.8 ms
+== before rep 2 load 11.64 10.35 8.03
+preview small: output() 32.9 ms, output_within 63.5 ms
+ffprobe small: output() 28.2 ms, output_within 31.4 ms
+preview 1080p: output() 77.1 ms, output_within 113.6 ms
+ffprobe 1080p: output() 32.5 ms, output_within 63.4 ms
+10 MB: stage_file 28.8 ms, one MD5 pass 13.5 ms
+100 MB: stage_file 280.2 ms, one MD5 pass 136.5 ms
+== poll rep 2 load 11.84 10.46 8.10
+preview small: output() 32.1 ms, output_within 32.6 ms
+ffprobe small: output() 26.7 ms, output_within 27.6 ms
+preview 1080p: output() 74.8 ms, output_within 78.1 ms
+ffprobe 1080p: output() 32.5 ms, output_within 37.6 ms
+10 MB: stage_file 28.2 ms, one MD5 pass 13.4 ms
+100 MB: stage_file 276.6 ms, one MD5 pass 134.4 ms
+== after rep 2 load 11.08 10.36 8.11
+preview small: output() 32.2 ms, output_within 32.6 ms
+ffprobe small: output() 25.9 ms, output_within 27.7 ms
+preview 1080p: output() 71.3 ms, output_within 73.2 ms
+ffprobe 1080p: output() 32.6 ms, output_within 37.7 ms
+10 MB: stage_file 13.7 ms, one MD5 pass 13.5 ms
+100 MB: stage_file 136.4 ms, one MD5 pass 136.7 ms
+== before rep 3 load 11.07 10.38 8.14
+preview small: output() 35.8 ms, output_within 63.5 ms
+ffprobe small: output() 26.5 ms, output_within 31.5 ms
+preview 1080p: output() 78.1 ms, output_within 113.6 ms
+ffprobe 1080p: output() 31.2 ms, output_within 31.5 ms
+10 MB: stage_file 28.0 ms, one MD5 pass 13.2 ms
+100 MB: stage_file 278.5 ms, one MD5 pass 135.5 ms
+== poll rep 3 load 10.97 10.38 8.17
+preview small: output() 31.4 ms, output_within 32.6 ms
+ffprobe small: output() 25.9 ms, output_within 27.6 ms
+preview 1080p: output() 72.0 ms, output_within 73.1 ms
+ffprobe 1080p: output() 31.0 ms, output_within 32.6 ms
+10 MB: stage_file 28.4 ms, one MD5 pass 13.4 ms
+100 MB: stage_file 279.4 ms, one MD5 pass 136.1 ms
+== after rep 3 load 10.98 10.40 8.20
+preview small: output() 31.8 ms, output_within 32.6 ms
+ffprobe small: output() 25.8 ms, output_within 27.6 ms
+preview 1080p: output() 70.0 ms, output_within 73.1 ms
+ffprobe 1080p: output() 30.6 ms, output_within 32.6 ms
+10 MB: stage_file 13.4 ms, one MD5 pass 13.2 ms
+100 MB: stage_file 135.8 ms, one MD5 pass 135.7 ms
