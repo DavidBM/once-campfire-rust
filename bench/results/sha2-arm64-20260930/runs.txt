@@ -3,7 +3,7 @@
 # median and range of 7 runs of ~64 MB each.
 #
 # The measurement that matters has to run on ARM (a Pi 5, Graviton, or the ubuntu-24.04-arm runner
-# the publish workflow uses), at 00f9744 or later, twice:
+# the publish workflow uses), at 62394bb or later, both ways, interleaved, three rounds:
 #   cargo run --release -p campfire_kit --example sha256_bench                               # after
 #   cargo run --release -p campfire_kit --example sha256_bench --features sha2/force-soft    # before
 # `force-soft` selects exactly the code aarch64 ran before (sha2's `soft::compress`, which is also
@@ -11,9 +11,10 @@
 # Not measured here: this host has no aarch64 hardware.
 
 # Build check on emulated arm64 (qemu-user via binfmt): a standalone crate with sha2 =0.10.9
-# features ["asm"] and this example's code (4 MB per run), built in rust:1.98.1-slim-trixie
-# --platform linux/arm64 (a subset of the Dockerfile's rust:1.98.1-trixie build stage), then again
-# with sha2/force-soft. sha2-asm's build script assembled sha256_aarch64.S with the image's gcc,
+# features ["asm"] and this example's code before 62394bb reworded its first line (4 MB per run),
+# built in rust:1.98.1-slim-trixie --platform linux/arm64 (a subset of the Dockerfile's
+# rust:1.98.1-trixie build stage), then again with sha2/force-soft. sha2-asm's build script
+# assembled sha256_aarch64.S with the image's gcc,
 # and both builds print the same digest. qemu emulates the SHA-256 instructions with helper calls,
 # so the hardware path is slower there than translated scalar code: these timings only show that
 # the two builds take different paths, and say nothing about real ARM CPUs.
@@ -35,51 +36,104 @@ message fragment (1024 B): median 6.446µs per hash (0.16 GB/s), range 6.419µs.
 room page text (34816 B): median 201.925µs per hash (0.17 GB/s), range 201.327µs..202.336µs
 whole room page (425984 B): median 2.457016ms per hash (0.17 GB/s), range 2.454242ms..2.461062ms
 
-# x86_64 as a proxy (AMD Ryzen AI Max+ 395, SHA-NI): the same example, `force-soft` against the
-# default build (sha2 detects SHA-NI at runtime without any feature). Interleaved, three rounds;
-# load average 5-7. Medians of the three rounds:
+# x86_64 as a proxy (AMD Ryzen AI Max+ 395, SHA-NI): the committed example (62394bb, the same
+# timing code as 56f7aa4), `force-soft` against the default build (sha2 detects SHA-NI at runtime
+# without any feature). Both built once, then run interleaved, three rounds; other agents' builds
+# kept the load average at 3-6. Medians of the three rounds:
 #                                   software     SHA-NI      ratio
-# cookie HMAC input (64 B)          229 ns       59 ns       3.9x
-# message fragment (1 KB)           2.00 µs      445 ns      4.5x
-# room page text (34 KB)            59.2 µs      14.1 µs     4.2x
-# whole room page (464 KB)          810 µs       192 µs      4.2x
-# (these rounds ran before the example gained its digest line and the 416 KB page size; raw below)
-# The final example prints "digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14"
-# with SHA-NI and with force-soft here, and with both backends on emulated arm64 (below).
-
-# round 1, force-soft (load average: 5.22, 6.68, 8.24)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 227ns per hash (0.28 GB/s), range 226ns..231ns
-message fragment (1024 B): median 1.984µs per hash (0.52 GB/s), range 1.964µs..2.04µs
-room page text (34816 B): median 58.425µs per hash (0.60 GB/s), range 58.252µs..59.939µs
-whole room page (475136 B): median 793.832µs per hash (0.60 GB/s), range 791.951µs..800.509µs
-# round 1, default (load average: 5.44, 6.70, 8.24)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 61ns per hash (1.05 GB/s), range 57ns..61ns
+# cookie HMAC input (64 B)          226 ns       57 ns       4.0x
+# message fragment (1 KB)           1.95 µs      444 ns      4.4x
+# room page text (34 KB)            58.0 µs      14.1 µs     4.1x
+# whole room page (416 KB)          705 µs       172 µs      4.1x
+# (An earlier version of the example, which hashed a 464 KB page and printed no digest line, gave
+# 3.9x, 4.5x, 4.2x and 4.2x; its raw rounds are in this file's history at 56f7aa4.)
+# round 1, force-soft (load average: 2.92, 5.78, 6.80)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 225ns per hash (0.28 GB/s), range 225ns..225ns
+message fragment (1024 B): median 1.948µs per hash (0.53 GB/s), range 1.944µs..1.998µs
+room page text (34816 B): median 59.281µs per hash (0.59 GB/s), range 58.223µs..60.999µs
+whole room page (425984 B): median 726.324µs per hash (0.59 GB/s), range 710.155µs..1.050808ms
+# round 1, default (load average: 3.09, 5.77, 6.79)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 58ns per hash (1.10 GB/s), range 57ns..58ns
 message fragment (1024 B): median 445ns per hash (2.30 GB/s), range 445ns..446ns
-room page text (34816 B): median 14.094µs per hash (2.47 GB/s), range 14.081µs..14.151µs
-whole room page (475136 B): median 192.027µs per hash (2.47 GB/s), range 191.786µs..192.632µs
-# round 2, force-soft (load average: 5.44, 6.70, 8.24)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 232ns per hash (0.28 GB/s), range 227ns..263ns
-message fragment (1024 B): median 2.001µs per hash (0.51 GB/s), range 1.99µs..2.066µs
-room page text (34816 B): median 59.174µs per hash (0.59 GB/s), range 59.109µs..59.34µs
-whole room page (475136 B): median 809.992µs per hash (0.59 GB/s), range 803.175µs..818.832µs
-# round 2, default (load average: 5.33, 6.65, 8.22)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 59ns per hash (1.08 GB/s), range 59ns..60ns
-message fragment (1024 B): median 455ns per hash (2.25 GB/s), range 453ns..457ns
-room page text (34816 B): median 14.335µs per hash (2.43 GB/s), range 14.323µs..14.375µs
-whole room page (475136 B): median 195.119µs per hash (2.44 GB/s), range 194.647µs..195.651µs
-# round 3, force-soft (load average: 5.33, 6.65, 8.22)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 229ns per hash (0.28 GB/s), range 226ns..232ns
-message fragment (1024 B): median 2.017µs per hash (0.51 GB/s), range 1.99µs..2.037µs
-room page text (34816 B): median 59.298µs per hash (0.59 GB/s), range 59.198µs..59.596µs
-whole room page (475136 B): median 817.807µs per hash (0.58 GB/s), range 806.383µs..835.094µs
-# round 3, default (load average: 5.38, 6.64, 8.21)
-x86_64 with SHA-256 instructions: true
-cookie HMAC input (64 B): median 57ns per hash (1.12 GB/s), range 57ns..64ns
-message fragment (1024 B): median 443ns per hash (2.31 GB/s), range 443ns..443ns
-room page text (34816 B): median 14.04µs per hash (2.48 GB/s), range 14.028µs..14.051µs
-whole room page (475136 B): median 191.074µs per hash (2.49 GB/s), range 191.039µs..191.311µs
+room page text (34816 B): median 14.118µs per hash (2.47 GB/s), range 14.085µs..14.239µs
+whole room page (425984 B): median 172.371µs per hash (2.47 GB/s), range 171.905µs..172.589µs
+# round 2, force-soft (load average: 3.09, 5.77, 6.79)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 228ns per hash (0.28 GB/s), range 225ns..233ns
+message fragment (1024 B): median 1.992µs per hash (0.51 GB/s), range 1.948µs..2.133µs
+room page text (34816 B): median 57.709µs per hash (0.60 GB/s), range 57.4µs..58.099µs
+whole room page (425984 B): median 702.126µs per hash (0.61 GB/s), range 701.439µs..713.317µs
+# round 2, default (load average: 3.24, 5.76, 6.78)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 57ns per hash (1.12 GB/s), range 57ns..57ns
+message fragment (1024 B): median 441ns per hash (2.32 GB/s), range 441ns..441ns
+room page text (34816 B): median 13.962µs per hash (2.49 GB/s), range 13.945µs..14µs
+whole room page (425984 B): median 170.458µs per hash (2.50 GB/s), range 170.303µs..170.881µs
+# round 3, force-soft (load average: 3.24, 5.76, 6.78)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 226ns per hash (0.28 GB/s), range 224ns..265ns
+message fragment (1024 B): median 1.942µs per hash (0.53 GB/s), range 1.938µs..1.957µs
+room page text (34816 B): median 58.029µs per hash (0.60 GB/s), range 57.46µs..59.341µs
+whole room page (425984 B): median 705.226µs per hash (0.60 GB/s), range 704.505µs..709.011µs
+# round 3, default (load average: 3.46, 5.76, 6.78)
+x86_64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 57ns per hash (1.12 GB/s), range 57ns..58ns
+message fragment (1024 B): median 444ns per hash (2.31 GB/s), range 444ns..447ns
+room page text (34816 B): median 14.056µs per hash (2.48 GB/s), range 14.038µs..14.159µs
+whole room page (425984 B): median 171.613µs per hash (2.48 GB/s), range 171.301µs..172.889µs
+
+# Whole app on emulated arm64, at 62394bb: the branch's tree cross-built in rust:1.98.1-trixie
+# (amd64) with rustup's aarch64-unknown-linux-gnu target, Debian's gcc-aarch64-linux-gnu and
+# libvips-dev:arm64, JEMALLOC_SYS_WITH_LG_PAGE=14 as the Dockerfile sets for arm64; then the example
+# and the whole test suite run under the host's binfmt qemu-aarch64 (whose default CPU has the
+# SHA-256 instructions, so the asm build takes the instruction path):
+#   cargo tree --locked --target aarch64-unknown-linux-gnu -e features -i sha2
+#   cargo build --locked --release -p campfire --target aarch64-unknown-linux-gnu
+#   cargo build --locked --release -p campfire_kit --example sha256_bench --target ... [--features sha2/force-soft]
+#   CAMPFIRE_REQUIRE_SEED=1 cargo test --locked --release --workspace --exclude html5ever \
+#     --target aarch64-unknown-linux-gnu --no-fail-fast -- --test-threads=4
+== sha2 features for aarch64-unknown-linux-gnu
+sha2 feature "asm"
+sha2 feature "default"
+sha2 feature "std"
+== build campfire (release, aarch64-unknown-linux-gnu)
+   Compiling sha2-asm v0.6.4
+   Compiling sha2 v0.10.9
+    Finished `release` profile [optimized] target(s) in 2m 54s
+  Machine:                           AArch64
+== example, asm build, then force-soft build
+    Finished `release` profile [optimized] target(s) in 17.57s
+    Finished `release` profile [optimized] target(s) in 12.90s
+-- asm
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 1.131µs per hash (0.06 GB/s), range 1.129µs..1.196µs
+message fragment (1024 B): median 8.048µs per hash (0.13 GB/s), range 7.993µs..8.102µs
+room page text (34816 B): median 249.572µs per hash (0.14 GB/s), range 248.876µs..250.175µs
+whole room page (425984 B): median 3.052762ms per hash (0.14 GB/s), range 3.036356ms..3.066101ms
+-- soft
+aarch64, CPU has SHA-256 instructions: true
+digest of every length to 2 KB: 60a76f1a28bf9ed9062536fbb6f22f269fad843cf057e4d9e328593664f58a14
+cookie HMAC input (64 B): median 814ns per hash (0.08 GB/s), range 804ns..847ns
+message fragment (1024 B): median 5.722µs per hash (0.18 GB/s), range 5.689µs..5.754µs
+room page text (34816 B): median 179.194µs per hash (0.19 GB/s), range 177.02µs..180.974µs
+whole room page (425984 B): median 2.191382ms per hash (0.19 GB/s), range 2.182615ms..2.194841ms
+== tests (release, aarch64-unknown-linux-gnu, emulated)
+713 passed, 4 failed, 7 ignored. The four failures are the emulator's, not SHA-256's:
+  campfire tests::transparent_huge_pages_are_disabled: qemu-user rejects PR_SET_THP_DISABLE
+    ("couldn't disable transparent huge pages: Invalid argument (os error 22)")
+  campfire_richtext hardening deeply_nested_content_attachments_render_quickly and
+    html_tags_in_the_body_parse_in_linear_time: their time budgets, at 1.23 s under emulation
+  campfire_storage vectors pipeline_matches_the_reference: no ffprobe in the build container
+    ("ffprobe output: EOF while parsing a value at line 1 column 0")
+Everything that hashes passed: rails_compat's and kit's Rails vectors (message verifiers and
+encryptors, signed and encrypted cookies), kit's ETag and page-part tests, the assets' digests
+(crates/assets/tests/reference.rs), and the app's seeded tests (the other 172 in campfire).
