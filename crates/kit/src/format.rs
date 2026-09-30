@@ -180,7 +180,7 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
         };
         for name in names {
             let q = match q {
-                Some(q) => ruby_to_f(q),
+                Some(q) => ruby_compat::to_f(q),
                 None if name == "*/*" => 0.0,
                 None => 1.0,
             };
@@ -188,7 +188,7 @@ pub fn parse_accept(header: &str) -> Result<Vec<Format>, InvalidMimeType> {
             index += 1;
         }
     }
-    // -0.0 ties with 0.0, as both are Ruby's 0 (`ruby_to_f` never gives NaN).
+    // -0.0 ties with 0.0, as both are Ruby's 0 (`to_f` never gives NaN).
     list.sort_by(|a, b| b.q.partial_cmp(&a.q).unwrap_or(std::cmp::Ordering::Equal).then(a.index.cmp(&b.index)));
     sort_xml(&mut list);
 
@@ -304,58 +304,6 @@ fn trailing_star(accept: &str) -> Option<Vec<Format>> {
     let kind = ["text/*", "application/*"].into_iter().find(|p| accept.starts_with(p))?;
     let prefix = &kind[..kind.len() - 1];
     Some(REGISTERED.iter().copied().filter(|m| m.matches(prefix)).collect())
-}
-
-/// Ruby's `String#to_f`: the float at the start, after whitespace (digits with an underscore
-/// allowed between two, then a fraction and an exponent), and 0.0 when there is none. `"1.2.3"`
-/// is 1.2 and `"1e2"` is 100.0. Hexadecimal isn't read.
-pub(crate) fn ruby_to_f(s: &str) -> f64 {
-    let bytes = s.trim_start_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']).as_bytes();
-    let mut number = String::new();
-    let mut i = 0;
-    if let Some(&sign @ (b'+' | b'-')) = bytes.first() {
-        number.push(sign as char);
-        i += 1;
-    }
-    let mut digits = push_digits(bytes, &mut i, &mut number);
-    if bytes.get(i) == Some(&b'.') {
-        number.push('.');
-        i += 1;
-        digits += push_digits(bytes, &mut i, &mut number);
-    }
-    if digits == 0 {
-        return 0.0;
-    }
-    if matches!(bytes.get(i), Some(b'e' | b'E')) {
-        let mut exponent = String::from("e");
-        let mut j = i + 1;
-        if let Some(&sign @ (b'+' | b'-')) = bytes.get(j) {
-            exponent.push(sign as char);
-            j += 1;
-        }
-        if push_digits(bytes, &mut j, &mut exponent) > 0 {
-            number.push_str(&exponent);
-        }
-    }
-    number.parse().unwrap_or(0.0)
-}
-
-/// Appends the digits at `bytes[*i..]` to `out`, skipping an underscore between two of them, and
-/// returns how many there were.
-fn push_digits(bytes: &[u8], i: &mut usize, out: &mut String) -> usize {
-    let mut count = 0;
-    while let Some(&b) = bytes.get(*i) {
-        match b {
-            b'0'..=b'9' => {
-                out.push(b as char);
-                count += 1;
-            }
-            b'_' if count > 0 && bytes.get(*i + 1).is_some_and(u8::is_ascii_digit) => {}
-            _ => break,
-        }
-        *i += 1;
-    }
-    count
 }
 
 /// Everything `MimeNegotiation#formats` looks at.
@@ -491,6 +439,9 @@ mod tests {
             ("text/html;q=1e19, application/json;q=1e20", ["json", "html"]),
             ("text/html;q=-0.001, application/json;q=0", ["html", "json"]),
             ("application/json;q=0, text/html;q=-0.001", ["json", "html"]),
+            // `String#to_f` reads hexadecimal after a sign only.
+            ("text/html;q=0.5, application/json;q=+0x1", ["json", "html"]),
+            ("text/html;q=0.5, application/json;q=0x1", ["html", "json"]),
         ] {
             assert_eq!(symbols(&parse_accept(accept).unwrap()), order, "{accept}");
         }
@@ -498,54 +449,6 @@ mod tests {
         // Rails raises FloatDomainError (a 500) on an infinite q-value.
         assert_eq!(symbols(&parse_accept("text/html;q=1e400, application/json").unwrap()), ["html", "json"]);
         assert_eq!(symbols(&parse_accept("text/html;q=-1e400, application/json").unwrap()), ["json", "html"]);
-    }
-
-    #[test]
-    fn to_f_like_ruby() {
-        // `String#to_f` in the reference.
-        for (s, f) in [
-            ("0.5", 0.5),
-            ("0.5.1", 0.5),
-            ("1.5.5e2", 1.5),
-            ("1e2", 100.0),
-            ("1E2", 100.0),
-            ("1.2e-1", 0.12),
-            ("1.5e+2", 150.0),
-            ("1.e5", 100000.0),
-            ("1e2.5", 100.0),
-            ("1e0_1", 10.0),
-            ("1e", 1.0),
-            ("1e+", 1.0),
-            ("0.5e-", 0.5),
-            ("1e_2", 1.0),
-            ("1_0.5", 10.5),
-            ("1_2_3.4_5", 123.45),
-            ("0.5_5", 0.55),
-            ("0_0.5", 0.5),
-            ("1__0", 1.0),
-            ("1_e2", 1.0),
-            ("1._5", 1.0),
-            ("_1", 0.0),
-            (".5", 0.5),
-            ("+.5", 0.5),
-            ("-.5", -0.5),
-            ("5.", 5.0),
-            ("00.5", 0.5),
-            ("  -1.5x", -1.5),
-            ("\u{b}0.5", 0.5),
-            ("1,5", 1.0),
-            ("0x1A", 0.0),
-            (".e5", 0.0),
-            ("e5", 0.0),
-            (".", 0.0),
-            ("-", 0.0),
-            ("+", 0.0),
-            ("", 0.0),
-            ("1e-400", 0.0),
-            ("1e400", f64::INFINITY),
-        ] {
-            assert_eq!(ruby_to_f(s), f, "{s:?}");
-        }
     }
 
     #[test]

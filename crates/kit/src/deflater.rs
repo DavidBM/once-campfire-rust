@@ -16,8 +16,6 @@ use flate2::{Compression, GzBuilder};
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
 
-use crate::format::ruby_to_f;
-
 pub mod splice;
 
 /// A response `ActionDispatch::Static` served (a public file or an asset). Marks responses the
@@ -135,7 +133,7 @@ fn parse_accept_encoding(header: &str) -> Vec<(String, f64)> {
                 .and_then(|p| p.strip_prefix("q="))
                 .map(|q| &q[..q.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(q.len())])
                 .filter(|digits| !digits.is_empty())
-                .map(ruby_to_f)
+                .map(ruby_compat::to_f)
                 .unwrap_or(1.0);
             (attribute.to_string(), quality)
         })
