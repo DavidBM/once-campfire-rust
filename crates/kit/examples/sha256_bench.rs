@@ -1,6 +1,6 @@
 //! SHA-256 throughput at the sizes the app hashes: a cookie's HMAC input, a message fragment
 //! (`PageParts`' fragment digests), a room page's text parts (`text_part`) and a whole page
-//! (`rack_etag` for a page without parts, and asset digests). Per size: the median and range of 7
+//! (`rack_etag` for a page without parts). Per size: the median and range of 7
 //! runs, each hashing about 64 MB. First it prints a digest over every length from 0 to 2 KB, which
 //! must come out the same from both backends.
 //!

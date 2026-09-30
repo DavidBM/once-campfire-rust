@@ -4,7 +4,8 @@ sha2 0.10.9 picks its SHA-256 backend at compile time (`src/sha256.rs`): on x86_
 the SHA-NI backend, which checks for the instructions at runtime; on aarch64 it builds its ARMv8
 backend (the `sha2` instructions when `cpufeatures` finds them, the software rounds otherwise) only
 with the `asm` feature, and otherwise the software rounds alone. So the arm64 image hashed every
-page's text parts, ETags, cookie HMACs and asset digests in software. `00f9744` turns on `asm` for
+page's text parts, ETags and cookie HMACs in software (asset digests are SHA-1, as Propshaft's
+are). `00f9744` turns on `asm` for
 `cfg(target_arch = "aarch64")` in crates/kit/Cargo.toml; features unify, so every sha2 user gets
 it.
 
