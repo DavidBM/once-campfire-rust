@@ -220,6 +220,7 @@ fn same_ignoring_case(a: &str, b: &str) -> bool {
 /// A whole header is quicker to lowercase once and search (`String::to_lowercase` has its own
 /// ASCII path).
 fn contains_ignoring_case(haystack: &str, needle: &str) -> bool {
+    debug_assert!(!needle.is_empty() && needle.bytes().all(|b| b.is_ascii() && !b.is_ascii_uppercase()), "{needle:?}");
     if haystack.is_ascii() {
         haystack.as_bytes().windows(needle.len()).any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
     } else {
