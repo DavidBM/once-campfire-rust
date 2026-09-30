@@ -22,6 +22,7 @@ protocol recordings all come from running the real Rails app.
 
 | Crate | What it replaces |
 |---|---|
+| `ruby` | The Ruby string behaviour the other crates rely on (ERB escaping, `String#to_i` and `#to_f`, `Float#to_s`, `CGI.escape`, Rack's byte ranges), checked against Ruby itself |
 | `rails_compat` | Rails' signed and encrypted cookies, signed IDs, signed global IDs, Turbo stream names and bcrypt, byte-compatible with Rails so sessions carry over |
 | `kit` | Rack, Action Dispatch and Thruster, on Axum: Rails-style nested params, sessions, flash, format negotiation, forgery protection by `Sec-Fetch-Site`, ETags and gzip built from a page's cached parts, plus an in-process front server with TLS and ACME, HTTP/2 and Thruster's response cache |
 | `db` | Active Record over the existing schema (rusqlite), with the same callbacks, timestamps and STI values, and a Rails-compatible fixture loader |

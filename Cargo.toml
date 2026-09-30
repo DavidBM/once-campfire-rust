@@ -17,6 +17,7 @@ unsafe_code = "deny"
 undocumented_unsafe_blocks = "warn"
 
 [workspace.dependencies]
+ruby_compat       = { path = "crates/ruby" }
 rails_compat      = { path = "crates/rails_compat" }
 campfire_kit      = { path = "crates/kit" }
 campfire_routes   = { path = "crates/routes" }
