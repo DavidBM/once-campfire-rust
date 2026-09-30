@@ -206,9 +206,16 @@ async fn collect(
 ) -> Vec<String> {
     let mut frames = Vec::new();
     let quiet = if await_ping { Duration::from_secs(4) } else { Duration::from_millis(400) };
+    // One deadline for the expected frames: the pings dropped below arrive every 3 s and would
+    // otherwise restart the wait forever.
+    let expected_by = tokio::time::Instant::now() + EXPECTED_FRAME_WAIT;
     loop {
-        let wait = if frames.len() < at_least { EXPECTED_FRAME_WAIT } else { quiet };
-        let Ok(message) = tokio::time::timeout(wait, ws.next()).await else { break };
+        let next = if frames.len() < at_least {
+            tokio::time::timeout_at(expected_by, ws.next()).await
+        } else {
+            tokio::time::timeout(quiet, ws.next()).await
+        };
+        let Ok(message) = next else { break };
         match message {
             Some(Ok(Message::Text(text))) => {
                 let text = text.to_string();
