@@ -39,6 +39,10 @@ impl Page for Index<'_> {
     fn body_class(&self) -> Option<&str> {
         Some("sidebar searches")
     }
+
+    fn extra_capacity(&self) -> usize {
+        crate::layouts::messages_page_capacity(self.ctx, &self.index.messages)
+    }
 }
 
 /// `searches_path(q: query)`.

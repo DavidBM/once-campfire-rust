@@ -22,7 +22,7 @@ macro_rules! framed_page {
         $crate::controllers::presenters::view_context::page_or_frame(
             $c,
             $status,
-            |$ctx| askama::Template::render(&$page),
+            |$ctx| campfire_views::layouts::render_page(&$page),
             |$ctx| {
                 let page = $page;
                 campfire_views::layouts::frame($ctx, page.as_head(), page.as_content())
