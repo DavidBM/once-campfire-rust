@@ -67,7 +67,7 @@ pub async fn create(c: &mut Ctx) -> Result {
             c.redirect_to(&root)
         }
         // rescue ActiveRecord::RecordNotUnique: `redirect_to new_session_url(email_address: user_params[:email_address])`
-        Err(error) if presenters::accounts::is_record_not_unique(&error) => {
+        Err(error) if error.is_record_not_unique() => {
             let mut location = c.url_for(&campfire_routes::new_session());
             if let Some(email_address) = email_address {
                 location.push_str(&format!("?email_address={}", campfire_views::helpers::url::cgi_escape(&email_address)));

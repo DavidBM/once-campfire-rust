@@ -222,7 +222,7 @@ impl Database {
                     }
                 }
             })
-            .map_err(|e| Error::Other(e.to_string()))?;
+            .map_err(Error::other)?;
 
         let readers = (0..config.readers.max(1)).map(|_| open_connection(&config.path, true)).collect::<Result<Vec<_>>>()?;
 
@@ -275,7 +275,7 @@ impl Database {
         F: FnOnce(&Connection) -> Result<T> + Send + 'static,
     {
         let readers = self.readers.clone();
-        tokio::task::spawn_blocking(move || readers.with(f)).await.map_err(|e| Error::Other(e.to_string()))?
+        tokio::task::spawn_blocking(move || readers.with(f)).await.map_err(Error::other)?
     }
 
     /// [`Database::read`] for synchronous callers.
@@ -330,7 +330,7 @@ impl Checkpoints {
                     checkpoint(&conn, "PASSIVE");
                 }
             })
-            .map_err(|e| Error::Other(e.to_string()))?;
+            .map_err(Error::other)?;
         Ok(Self { wake, running, woken_at: 0 })
     }
 

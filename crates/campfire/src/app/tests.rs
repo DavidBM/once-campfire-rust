@@ -350,7 +350,7 @@ async fn jobs_run_ad_hoc_work_and_purge_unattached_blobs() {
         .write(move |tx| {
             storage
                 .create_and_upload(tx.conn(), b"hello", campfire_storage::Filename::new("hello.txt"), None, now)
-                .map_err(|e| campfire_db::Error::Other(e.to_string()))
+                .map_err(campfire_db::Error::other)
         })
         .await
         .unwrap();

@@ -102,7 +102,7 @@ pub fn assign(tx: &mut Tx<'_>, record: Record, name: &str, assignment: Assignmen
             Ok(None)
         }
         Assignment::Create(staged) => attach(tx, record, name, staged).map(Some),
-        Assignment::Invalid => Err(campfire_db::Error::Other("Could not find or build blob: expected attachable".into())),
+        Assignment::Invalid => Err(campfire_db::Error::other("Could not find or build blob: expected attachable")),
     }
 }
 
@@ -202,5 +202,5 @@ pub async fn processed_variant(app: &App, record: Record, name: &str, transforma
 }
 
 pub fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
-    campfire_db::Error::Other(error.to_string())
+    campfire_db::Error::other(error)
 }

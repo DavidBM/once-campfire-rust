@@ -115,9 +115,9 @@ fn load_files(conn: &Connection, dir: &Path, files: &[PathBuf], options: &Option
     let mut loaded = Loaded::default();
     for file in files {
         let table = table_name(dir, file);
-        let source = std::fs::read_to_string(file).map_err(|e| Error::Other(format!("{}: {e}", file.display())))?;
+        let source = std::fs::read_to_string(file).map_err(|e| Error::other(format!("{}: {e}", file.display())))?;
         let yaml = erb.render(&source)?;
-        let rows: Yaml = serde_yaml::from_str(&yaml).map_err(|e| Error::Other(format!("{}: {e}", file.display())))?;
+        let rows: Yaml = serde_yaml::from_str(&yaml).map_err(|e| Error::other(format!("{}: {e}", file.display())))?;
 
         conn.execute(&format!(r#"DELETE FROM "{table}""#), [])?;
         let columns = table_columns(conn, &table)?;
@@ -126,7 +126,7 @@ fn load_files(conn: &Connection, dir: &Path, files: &[PathBuf], options: &Option
 
         let Yaml::Mapping(rows) = rows else { continue };
         for (label, row) in rows {
-            let label = scalar_string(&label).ok_or_else(|| Error::Other(format!("bad label in {table}")))?;
+            let label = scalar_string(&label).ok_or_else(|| Error::other(format!("bad label in {table}")))?;
             if label == "DEFAULTS" || label == "_fixture" {
                 continue;
             }
@@ -148,26 +148,26 @@ fn fixture_row(table: &str, label: &str, row: Yaml, columns: &[String], now: Tim
         Yaml::Mapping(m) => m,
         Yaml::Null => Default::default(),
         _ => {
-            return Err(Error::Other(format!("fixture {table}.{label} is not a mapping")));
+            return Err(Error::other(format!("fixture {table}.{label} is not a mapping")));
         }
     };
 
     for (key, value) in mapping {
-        let key = scalar_string(&key).ok_or_else(|| Error::Other(format!("bad key in {table}.{label}")))?;
+        let key = scalar_string(&key).ok_or_else(|| Error::other(format!("bad key in {table}.{label}")))?;
         let association = associations(table).iter().find(|a| match a {
             Association::BelongsTo { key: k, .. } | Association::Polymorphic { key: k } => *k == key,
         });
         match association {
             Some(Association::BelongsTo { column, .. }) => {
-                let target = scalar_string(&value).ok_or_else(|| Error::Other(format!("{table}.{label}.{key}")))?;
+                let target = scalar_string(&value).ok_or_else(|| Error::other(format!("{table}.{label}.{key}")))?;
                 values.insert((*column).into(), Value::Integer(identify(target.trim_start_matches(':'))));
             }
             Some(Association::Polymorphic { key }) => {
-                let target = scalar_string(&value).ok_or_else(|| Error::Other(format!("{table}.{label}.{key}")))?;
+                let target = scalar_string(&value).ok_or_else(|| Error::other(format!("{table}.{label}.{key}")))?;
                 let (target_label, class) = match target.trim().strip_suffix(')').and_then(|t| t.rsplit_once(" (")) {
                     Some((l, c)) => (l.to_string(), c.to_string()),
                     None => {
-                        return Err(Error::Other(format!("{table}.{label}.{key} needs a (Class)")));
+                        return Err(Error::other(format!("{table}.{label}.{key} needs a (Class)")));
                     }
                 };
                 values.insert(format!("{key}_id"), Value::Integer(identify(target_label.trim_start_matches(':'))));
@@ -229,7 +229,7 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(&format!(r#"PRAGMA table_info("{table}")"#))?;
     let columns = stmt.query_map([], |r| r.get::<_, String>("name"))?.collect::<rusqlite::Result<Vec<_>>>()?;
     if columns.is_empty() {
-        return Err(Error::Other(format!("no table {table}")));
+        return Err(Error::other(format!("no table {table}")));
     }
     Ok(columns)
 }
@@ -242,8 +242,8 @@ fn table_name(dir: &Path, file: &Path) -> String {
 }
 
 fn collect_yaml_files(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir).map_err(|e| Error::Other(format!("{}: {e}", dir.display())))? {
-        let path = entry.map_err(|e| Error::Other(e.to_string()))?.path();
+    for entry in std::fs::read_dir(dir).map_err(|e| Error::other(format!("{}: {e}", dir.display())))? {
+        let path = entry.map_err(Error::other)?.path();
         if path.is_dir() {
             if path.file_name().is_some_and(|n| n != "files") {
                 collect_yaml_files(root, &path, files)?;
@@ -283,7 +283,7 @@ impl<'a> Erb<'a> {
         while let Some(start) = rest.find("<%") {
             out.push_str(&rest[..start]);
             let after = &rest[start + 2..];
-            let end = after.find("%>").ok_or_else(|| Error::Other("unterminated ERB tag".into()))?;
+            let end = after.find("%>").ok_or_else(|| Error::other("unterminated ERB tag"))?;
             let (output, code) = match after.strip_prefix('=') {
                 Some(code) => (true, &code[..end - 1]),
                 None => (false, &after[..end]),
@@ -325,7 +325,7 @@ impl<'a> Erb<'a> {
             let at = Timestamp::from_second(self.options.now.as_second()).ago(duration);
             return Ok(format!("{} UTC", at.to_db()));
         }
-        Err(Error::Other(format!("unsupported ERB in fixture: {code}")))
+        Err(Error::other(format!("unsupported ERB in fixture: {code}")))
     }
 }
 

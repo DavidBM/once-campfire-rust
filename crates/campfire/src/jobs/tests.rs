@@ -123,6 +123,29 @@ async fn a_panicking_job_is_logged_and_its_worker_carries_on() {
 }
 
 #[tokio::test]
+async fn a_failed_job_is_logged_with_its_cause() {
+    let (booted, _dir) = app().await;
+    let (logs, _guard) = Logs::capture();
+    let (jobs, queue) = Jobs::new(QUEUE_CAPACITY);
+    let runner = start(queue, booted.app.clone(), Registry::default(), 1);
+
+    let (done, finished) = tokio::sync::oneshot::channel();
+    jobs.perform_later("Failing", async {
+        let cause = campfire_db::Error::other(std::io::Error::other("disk full"));
+        Err(anyhow::Error::new(cause).context("purging the blob"))
+    });
+    jobs.perform_later("After", async move {
+        let _ = done.send(());
+        Ok(())
+    });
+    tokio::time::timeout(Duration::from_secs(5), finished).await.unwrap().unwrap();
+    runner.shutdown(Duration::from_secs(5)).await;
+
+    let logs = logs.text();
+    assert!(logs.contains("job failed job=\"Failing\" error=purging the blob: disk full"), "{logs}");
+}
+
+#[tokio::test]
 async fn shutdown_performs_what_is_queued_and_then_takes_no_more() {
     let (booted, _dir) = app().await;
     let (performed, mut performed_rx) = mpsc::unbounded_channel();

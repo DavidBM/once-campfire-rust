@@ -5,7 +5,6 @@ use campfire_db::{Account, FirstRun, PasswordDigest};
 use campfire_kit::{Ctx, Error, Result, StatusCode, format, halt};
 use campfire_views::first_runs;
 
-use super::presenters;
 use super::presenters::attachments::{self, Assignment, Record};
 use crate::app::AppCtx;
 use crate::concerns::{self, Before};
@@ -52,7 +51,7 @@ pub async fn create(c: &mut Ctx) -> Result {
             c.redirect_to(&root)
         }
         // rescue ActiveRecord::RecordNotUnique
-        Err(error) if presenters::accounts::is_record_not_unique(&error) => c.redirect_to(&root),
+        Err(error) if error.is_record_not_unique() => c.redirect_to(&root),
         Err(error) => Err(Error::internal(error)),
     }
 }

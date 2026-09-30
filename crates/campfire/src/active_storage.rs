@@ -626,7 +626,7 @@ fn query_ids(conn: &rusqlite::Connection, sql: &str, id: i64) -> campfire_db::Re
 fn storage_error(error: campfire_storage::Error) -> campfire_db::Error {
     match error {
         campfire_storage::Error::Sql(error) => error.into(),
-        other => campfire_db::Error::Other(other.to_string()),
+        other => campfire_db::Error::other(other),
     }
 }
 

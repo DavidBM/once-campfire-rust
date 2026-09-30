@@ -288,15 +288,6 @@ pub fn query_users(conn: &Connection, sql: &str, values: impl rusqlite::Params) 
     Ok(users)
 }
 
-/// `ActiveRecord::RecordNotUnique`: a unique index refused the write.
-pub fn is_record_not_unique(error: &campfire_db::Error) -> bool {
-    matches!(
-        error,
-        campfire_db::Error::Sqlite(rusqlite::Error::SqliteFailure(failure, _))
-            if failure.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE || failure.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
-    )
-}
-
 /// A permitted string attribute: `Some` when the key was given (its value may be nil).
 pub fn string_attribute(params: &campfire_kit::ParamMap, key: &str) -> Option<Option<String>> {
     if !params.contains_key(key) {

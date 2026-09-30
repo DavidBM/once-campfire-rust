@@ -83,7 +83,7 @@ pub async fn create(c: &mut Ctx) -> Result {
             page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
                 views::CreateStream { ctx, message: &item, room_kind: kind }.render()
             })
-            .map_err(|e| campfire_db::Error::Other(e.to_string()))
+            .map_err(campfire_db::Error::other)
         })
         .await
         .map_err(db_error)?;
@@ -399,7 +399,7 @@ pub(crate) async fn broadcast_replace(c: &Ctx, room: &Room, message: &Message) -
             let html = page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
                 views::PresentationPartial { ctx, message: &view }.render()
             })
-            .map_err(|e| campfire_db::Error::Other(e.to_string()))?;
+            .map_err(campfire_db::Error::other)?;
             let partials = Rendered { message_presentation: Some(html), ..Rendered::default() };
             app.broadcasts.message_replace(&room, &message, &partials);
             Ok(())

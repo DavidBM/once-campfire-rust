@@ -267,7 +267,7 @@ async fn perform(app: App, registry: &Registry, work: Work) {
     };
     match AssertUnwindSafe(job).catch_unwind().await {
         Ok(Ok(())) => tracing::info!(job = name, "performed"),
-        Ok(Err(error)) => tracing::error!(job = name, %error, "job failed"),
+        Ok(Err(error)) => tracing::error!(job = name, error = %format_args!("{error:#}"), "job failed"),
         Err(panic) => tracing::error!(job = name, panic = panic_message(&*panic), "job panicked"),
     }
 }
