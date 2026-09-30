@@ -89,31 +89,17 @@ fn resolve_enum(table: &str, column: &str, value: &str) -> Option<Value> {
     }
 }
 
-/// Loads every `*.yml` under `dir` into `conn`, inside the caller's transaction or its own.
+/// Loads every `*.yml` under `dir` into `conn`, inside the caller's transaction (a
+/// `Database::write`), which checks the foreign keys when it commits.
 pub fn load(conn: &Connection, dir: &Path, options: &Options) -> Result<Loaded> {
     let mut files = Vec::new();
-    collect_yaml_files(dir, dir, &mut files)?;
+    collect_yaml_files(dir, &mut files)?;
     files.sort();
 
-    let autocommit = conn.is_autocommit();
-    if autocommit {
-        conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
-    }
-    let result = load_files(conn, dir, &files, options);
-    if autocommit {
-        match &result {
-            Ok(_) => conn.execute_batch("COMMIT TRANSACTION")?,
-            Err(_) => conn.execute_batch("ROLLBACK TRANSACTION")?,
-        }
-    }
-    result
-}
-
-fn load_files(conn: &Connection, dir: &Path, files: &[PathBuf], options: &Options) -> Result<Loaded> {
     conn.execute_batch("PRAGMA defer_foreign_keys = ON")?;
     let mut erb = Erb::new(options);
     let mut loaded = Loaded::default();
-    for file in files {
+    for file in &files {
         let table = table_name(dir, file);
         let source = std::fs::read_to_string(file).map_err(|e| Error::other(format!("{}: {e}", file.display())))?;
         let yaml = erb.render(&source)?;
@@ -241,18 +227,17 @@ fn table_name(dir: &Path, file: &Path) -> String {
     relative.to_string_lossy().replace(['/', '\\'], "_")
 }
 
-fn collect_yaml_files(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_yaml_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir).map_err(|e| Error::other(format!("{}: {e}", dir.display())))? {
         let path = entry.map_err(Error::other)?.path();
         if path.is_dir() {
             if path.file_name().is_some_and(|n| n != "files") {
-                collect_yaml_files(root, &path, files)?;
+                collect_yaml_files(&path, files)?;
             }
         } else if path.extension().is_some_and(|e| e == "yml") {
             files.push(path);
         }
     }
-    let _ = root;
     Ok(())
 }
 

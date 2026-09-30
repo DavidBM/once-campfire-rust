@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{Error, Result};
@@ -128,22 +128,15 @@ impl<'c> Tx<'c> {
 }
 
 /// Runs `f` in `BEGIN IMMEDIATE`, commits, then runs the after-commit queue. An error from
-/// `f` rolls back and discards the queue. An error from an after-commit hook is returned
-/// after the rest of the queue has run (Rails raises it from the save that committed).
+/// `f`, a panic in it, or a failed commit rolls back and discards the queue. An error from an
+/// after-commit hook is returned after the rest of the queue has run (Rails raises it from the
+/// save that committed).
 pub fn run_write<T>(conn: &Connection, env: &Env, f: impl FnOnce(&mut Tx<'_>) -> Result<T>) -> Result<T> {
-    conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+    // Rolls back when dropped without committing.
+    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
     let mut tx = Tx { conn, env, in_transaction: true, after_commit: Vec::new() };
-    let value = match f(&mut tx) {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK TRANSACTION");
-            return Err(error);
-        }
-    };
-    if let Err(error) = conn.execute_batch("COMMIT TRANSACTION") {
-        let _ = conn.execute_batch("ROLLBACK TRANSACTION");
-        return Err(error.into());
-    }
+    let value = f(&mut tx)?;
+    transaction.commit()?;
 
     let mut queue = std::mem::take(&mut tx.after_commit);
     let mut first_error = None;
@@ -210,7 +203,9 @@ impl Database {
             .name("campfire-db-writer".into())
             .spawn(move || {
                 while let Some(job) = receiver.blocking_recv() {
-                    // A panicking write must not take the writer down with it.
+                    // A panicking write must not take the writer down with it. `run_write`'s
+                    // transaction rolls back as the panic unwinds; the rollback here is a
+                    // backstop for a job that panics some other way.
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&conn, &writer_env)));
                     if outcome.is_err() && !conn.is_autocommit() {
                         let _ = conn.execute_batch("ROLLBACK TRANSACTION");
@@ -442,6 +437,40 @@ mod tests {
         }
         // With one reader, a lost connection would make this wait forever.
         assert_eq!(db.read_blocking(|conn| Ok(conn.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?)).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_panicking_write_rolls_back() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE things (id INTEGER)").unwrap();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_write(&conn, &Env::default(), |tx| -> Result<()> {
+                tx.conn().execute("INSERT INTO things VALUES (1)", [])?;
+                panic!("a bug in a write")
+            })
+        }));
+        assert!(panicked.is_err());
+        assert!(conn.is_autocommit(), "the transaction was left open");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM things", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_panicking_write_leaves_the_writer_usable() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new(dir.path().join("test.sqlite3"));
+        config.readers = 1;
+        let db = Database::open(config, Env::default()).unwrap();
+        db.write_blocking(|tx| Ok(tx.conn().execute_batch("CREATE TABLE things (id INTEGER)")?)).unwrap();
+
+        let panicked = db.write_blocking(|tx| -> Result<()> {
+            tx.conn().execute("INSERT INTO things VALUES (1)", [])?;
+            panic!("a bug in a write")
+        });
+        assert!(matches!(panicked, Err(Error::WriterGone)), "{panicked:?}");
+
+        db.write_blocking(|tx| Ok(tx.conn().execute("INSERT INTO things VALUES (2)", [])?)).unwrap();
+        let ids = db.read_blocking(|conn| Ok(conn.query_row("SELECT group_concat(id) FROM things", [], |r| r.get::<_, String>(0))?));
+        assert_eq!(ids.unwrap(), "2");
     }
 
     /// Commits never checkpoint on the writer: the WAL reaching the auto-checkpoint threshold
