@@ -211,10 +211,11 @@ fn direct_placeholder_users(conn: &Connection, secrets: &Secrets, user: &User) -
     // every time it runs.
     let limit = (DIRECT_PLACEHOLDERS - exclude_user_ids.len() as i64).max(0);
     let sql = format!(
-        r#"SELECT * FROM "users" WHERE "users"."status" = 0 AND "users"."id" NOT IN ({}) ORDER BY "users"."created_at" ASC LIMIT {limit}"#,
+        r#"{} WHERE "users"."status" = 0 AND "users"."id" NOT IN ({}) ORDER BY "users"."created_at" ASC LIMIT {limit}"#,
+        User::SELECT,
         placeholders(exclude_user_ids.len())
     );
-    let users = query_all(conn, &sql, rusqlite::params_from_iter(&exclude_user_ids), User::from_row)?;
+    let users = User::find_by_sql(conn, &sql, rusqlite::params_from_iter(&exclude_user_ids))?;
     Ok(users.iter().map(|user| user_summary(secrets, user)).collect())
 }
 
@@ -224,8 +225,8 @@ fn direct_placeholder_users(conn: &Connection, secrets: &Secrets, user: &User) -
 /// administrators, `User.active` otherwise; `.ordered.without_bots`.
 pub fn account_users(conn: &Connection, can_administer: bool) -> campfire_db::Result<Vec<User>> {
     let status = if can_administer { r#""users"."status" IN (0, 2)"# } else { r#""users"."status" = 0"# };
-    let sql = format!(r#"SELECT * FROM "users" WHERE {status} AND "users"."role" != 2 ORDER BY LOWER(name)"#);
-    query_all(conn, &sql, [], User::from_row)
+    let sql = format!(r#"{} WHERE {status} AND "users"."role" != 2 ORDER BY LOWER(name)"#, User::SELECT);
+    User::find_by_sql(conn, &sql, [])
 }
 
 /// A bot row for `accounts/bots/_bot`: its key and `bot.rooms.without_directs.ordered`.

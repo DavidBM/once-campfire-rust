@@ -7,6 +7,7 @@ use crate::database::Tx;
 use crate::error::{Errors, OptionalExt, Result};
 use crate::events::Event;
 use crate::models::membership::membership_columns;
+use crate::models::user::user_columns;
 use crate::models::{Membership, Message, User};
 use crate::sql::{self, CachedStatements, columns, placeholders, query_all, query_one};
 use crate::time::{SQLITE_NOW, Timestamp};
@@ -305,7 +306,11 @@ impl Room {
     pub fn users(&self, conn: &Connection) -> Result<Vec<User>> {
         query_all(
             conn,
-            r#"SELECT "users".* FROM "users" INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ?"#,
+            concat!(
+                "SELECT ",
+                user_columns!(),
+                r#" FROM "users" INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ?"#
+            ),
             [self.id],
             User::from_row,
         )
@@ -325,7 +330,11 @@ impl Room {
     pub fn active_bots(&self, conn: &Connection) -> Result<Vec<User>> {
         query_all(
             conn,
-            r#"SELECT "users".* FROM "users" INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ? AND "users"."status" = 0 AND "users"."role" = 2"#,
+            concat!(
+                "SELECT ",
+                user_columns!(),
+                r#" FROM "users" INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ? AND "users"."status" = 0 AND "users"."role" = 2"#
+            ),
             [self.id],
             User::from_row,
         )

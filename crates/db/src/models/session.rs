@@ -1,11 +1,11 @@
 //! `reference/app/models/session.rb`
 
 use jiff::SignedDuration;
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 
 use crate::database::Tx;
 use crate::error::{OptionalExt, Result};
-use crate::sql::{self, CachedStatements, query_all, query_one};
+use crate::sql::{self, CachedStatements, columns, query_all, query_one};
 use crate::time::Timestamp;
 
 /// `Session::ACTIVITY_REFRESH_RATE`
@@ -23,31 +23,47 @@ pub struct Session {
     pub updated_at: Timestamp,
 }
 
-impl Session {
-    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            user_id: row.get("user_id")?,
-            token: row.get("token")?,
-            ip_address: row.get("ip_address")?,
-            user_agent: row.get("user_agent")?,
-            last_active_at: row.get("last_active_at")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
+columns! {
+    Session, "sessions", session_columns {
+        id: "id",
+        user_id: "user_id",
+        token: "token",
+        ip_address: "ip_address",
+        user_agent: "user_agent",
+        last_active_at: "last_active_at",
+        created_at: "created_at",
+        updated_at: "updated_at",
     }
+}
 
+impl Session {
     pub fn find(conn: &Connection, id: i64) -> Result<Self> {
-        query_one(conn, r#"SELECT * FROM "sessions" WHERE "sessions"."id" = ? LIMIT 1"#, [id], Self::from_row)?.or_not_found("Session")
+        query_one(
+            conn,
+            concat!("SELECT ", session_columns!(), r#" FROM "sessions" WHERE "sessions"."id" = ? LIMIT 1"#),
+            [id],
+            Self::from_row,
+        )?
+        .or_not_found("Session")
     }
 
     /// `Session.find_by(token:)`
     pub fn find_by_token(conn: &Connection, token: &str) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "sessions" WHERE "sessions"."token" = ? LIMIT 1"#, [token], Self::from_row)
+        query_one(
+            conn,
+            concat!("SELECT ", session_columns!(), r#" FROM "sessions" WHERE "sessions"."token" = ? LIMIT 1"#),
+            [token],
+            Self::from_row,
+        )
     }
 
     pub fn for_user(conn: &Connection, user_id: i64) -> Result<Vec<Self>> {
-        query_all(conn, r#"SELECT * FROM "sessions" WHERE "sessions"."user_id" = ?"#, [user_id], Self::from_row)
+        query_all(
+            conn,
+            concat!("SELECT ", session_columns!(), r#" FROM "sessions" WHERE "sessions"."user_id" = ?"#),
+            [user_id],
+            Self::from_row,
+        )
     }
 
     pub fn count_for_user(conn: &Connection, user_id: i64) -> Result<i64> {

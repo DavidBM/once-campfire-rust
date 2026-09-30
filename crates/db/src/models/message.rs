@@ -449,7 +449,8 @@ pub fn mentionees_in_room(conn: &Connection, room_id: i64, user_ids: &[i64]) -> 
         return Ok(Vec::new());
     }
     let sql = format!(
-        r#"SELECT "users".* FROM "users" INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ? AND "users"."id" IN ({})"#,
+        r#"{} INNER JOIN "memberships" ON "users"."id" = "memberships"."user_id" WHERE "memberships"."room_id" = ? AND "users"."id" IN ({})"#,
+        User::SELECT,
         placeholders(user_ids.len())
     );
     let values: Vec<i64> = std::iter::once(room_id).chain(user_ids.iter().copied()).collect();

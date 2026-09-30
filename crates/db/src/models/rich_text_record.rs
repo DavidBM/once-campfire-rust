@@ -1,10 +1,10 @@
 //! `ActionText::RichText` rows (`action_text_rich_texts`). Campfire has one: `Message#body`.
 
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 
 use crate::database::Tx;
 use crate::error::Result;
-use crate::sql::{CachedStatements, query_one};
+use crate::sql::{CachedStatements, columns, query_one};
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,23 +18,27 @@ pub struct RichTextRecord {
     pub updated_at: Timestamp,
 }
 
-impl RichTextRecord {
-    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            body: row.get("body")?,
-            record_type: row.get("record_type")?,
-            record_id: row.get("record_id")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
+columns! {
+    RichTextRecord, "action_text_rich_texts", rich_text_record_columns {
+        id: "id",
+        name: "name",
+        body: "body",
+        record_type: "record_type",
+        record_id: "record_id",
+        created_at: "created_at",
+        updated_at: "updated_at",
     }
+}
 
+impl RichTextRecord {
     pub fn find_for(conn: &Connection, record_type: &str, record_id: i64, name: &str) -> Result<Option<Self>> {
         query_one(
             conn,
-            r#"SELECT * FROM "action_text_rich_texts" WHERE "action_text_rich_texts"."record_id" = ? AND "action_text_rich_texts"."record_type" = ? AND "action_text_rich_texts"."name" = ? LIMIT 1"#,
+            concat!(
+                "SELECT ",
+                rich_text_record_columns!(),
+                r#" FROM "action_text_rich_texts" WHERE "action_text_rich_texts"."record_id" = ? AND "action_text_rich_texts"."record_type" = ? AND "action_text_rich_texts"."name" = ? LIMIT 1"#
+            ),
             params![record_id, record_type, name],
             Self::from_row,
         )

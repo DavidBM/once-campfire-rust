@@ -1,11 +1,11 @@
 //! `reference/app/models/boost.rb`
 
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 
 use crate::database::Tx;
 use crate::error::{OptionalExt, Result};
 use crate::models::Message;
-use crate::sql::{CachedStatements, query_all, query_one};
+use crate::sql::{CachedStatements, columns, query_all, query_one};
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,31 +18,37 @@ pub struct Boost {
     pub updated_at: Timestamp,
 }
 
-impl Boost {
-    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            message_id: row.get("message_id")?,
-            booster_id: row.get("booster_id")?,
-            content: row.get("content")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
+columns! {
+    Boost, "boosts", boost_columns {
+        id: "id",
+        message_id: "message_id",
+        booster_id: "booster_id",
+        content: "content",
+        created_at: "created_at",
+        updated_at: "updated_at",
     }
+}
 
+impl Boost {
     pub fn find(conn: &Connection, id: i64) -> Result<Self> {
-        query_one(conn, r#"SELECT * FROM "boosts" WHERE "boosts"."id" = ? LIMIT 1"#, [id], Self::from_row)?.or_not_found("Boost")
+        query_one(conn, concat!("SELECT ", boost_columns!(), r#" FROM "boosts" WHERE "boosts"."id" = ? LIMIT 1"#), [id], Self::from_row)?
+            .or_not_found("Boost")
     }
 
     pub fn for_message(conn: &Connection, message_id: i64) -> Result<Vec<Self>> {
-        query_all(conn, r#"SELECT "boosts".* FROM "boosts" WHERE "boosts"."message_id" = ?"#, [message_id], Self::from_row)
+        query_all(
+            conn,
+            concat!("SELECT ", boost_columns!(), r#" FROM "boosts" WHERE "boosts"."message_id" = ?"#),
+            [message_id],
+            Self::from_row,
+        )
     }
 
     /// `message.boosts.ordered`
     pub fn for_message_ordered(conn: &Connection, message_id: i64) -> Result<Vec<Self>> {
         query_all(
             conn,
-            r#"SELECT "boosts".* FROM "boosts" WHERE "boosts"."message_id" = ? ORDER BY "boosts"."created_at" ASC"#,
+            concat!("SELECT ", boost_columns!(), r#" FROM "boosts" WHERE "boosts"."message_id" = ? ORDER BY "boosts"."created_at" ASC"#),
             [message_id],
             Self::from_row,
         )
@@ -52,7 +58,11 @@ impl Boost {
     pub fn find_by_message_and_booster(conn: &Connection, message_id: i64, id: i64, booster_id: i64) -> Result<Self> {
         query_one(
             conn,
-            r#"SELECT "boosts".* FROM "boosts" WHERE "boosts"."message_id" = ? AND "boosts"."id" = ? AND "boosts"."booster_id" = ? LIMIT 1"#,
+            concat!(
+                "SELECT ",
+                boost_columns!(),
+                r#" FROM "boosts" WHERE "boosts"."message_id" = ? AND "boosts"."id" = ? AND "boosts"."booster_id" = ? LIMIT 1"#
+            ),
             [message_id, id, booster_id],
             Self::from_row,
         )?
