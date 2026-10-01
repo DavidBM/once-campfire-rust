@@ -1,0 +1,19 @@
+{
+  "rust_commit": "1ea6d6f6b24fd21e7d01e69b7c92df5c380bcbde",
+  "pull_request": "https://github.com/basecamp/once-campfire-rust/pull/43",
+  "rust_image": "campfire-rust:bench-emoon-pr43",
+  "reference_image": "campfire-reference:bench-898653e",
+  "server_cpus": "8-11",
+  "loadgen_cpus": "12-15",
+  "network": "host",
+  "repetitions": 3,
+  "http_seconds": 8,
+  "http_clients": [1, 16, 64],
+  "cable_clients": [100, 1000, 5000, 10000],
+  "cable_throughput_seconds": 15,
+  "cable_posters": 4,
+  "upload_repetitions": 5,
+  "load_max": 8,
+  "load_wait_seconds": 60,
+  "command": "RUST_IMAGE=campfire-rust:bench-emoon-pr43 REFERENCE_IMAGE=campfire-reference:bench-898653e PORT=4490 HTTP_SECS=8 HTTP_CONCS='1 16 64' CABLE_CLIENTS='100 1000 5000 10000' CABLE_TPUT_SECS=15 LOAD_MAX=8 LOAD_WAIT_SECS=60 bench/run --apps reference,rust --reps 3 --out bench/results/emoon-pr43-production-20261001"
+}

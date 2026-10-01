@@ -1,0 +1,27 @@
+Local integration of https://github.com/basecamp/once-campfire-rust/pull/43
+
+All seven implementation commits and the author's benchmark results are present.
+The base also includes upstream's media and User-Agent performance PRs (#39 and #40).
+
+Validation:
+- cargo fmt for the root workspace and bench/loadgen: passed.
+- cargo clippy --locked --workspace --exclude html5ever --all-targets -- -D warnings: passed.
+- bench/loadgen clippy with -D warnings: passed.
+- cargo-shear 1.14.0 for both workspaces: no issues.
+- CAMPFIRE_REQUIRE_SEED=1 cargo test --locked --no-fail-fast --workspace --exclude html5ever:
+  770 passed, 0 failed, 11 ignored. All required reference-built seeds were available.
+- Docker campfire-toolchain cargo test --locked -p campfire_storage:
+  22 passed, 0 failed, 0 ignored, with CAMPFIRE_REQUIRE_MEDIA_VECTORS=1.
+  This covers the media byte comparisons skipped by the host's newer libvips/ffmpeg.
+- Parity harness TypeScript check: passed; harness unit tests: 14 passed.
+- Response comparison: 20 before/after pairs, byte-identical after decoding.
+  Fresh copies of the default seed, clock frozen at its recorded instant, identity and gzip,
+  two passes each through /up, room_show, messages_page, sidebar and search.
+  Details are in response-comparison.json. Sidebar ETags change as described in the PR.
+
+Measurements:
+- Three interleaved repetitions, five seconds per cell, 16 and 64 clients.
+- All measured requests returned HTTP 200; no request errors.
+- CPU per request and p99 latency improved on all four workloads at both client counts.
+- The generated report shows medians and ranges; raw runs preserve full precision.
+- Cable load and the full browser screenshot parity matrix were not rerun locally.

@@ -10,7 +10,7 @@ the few files in [`crates/assets/overrides/`](crates/assets/OVERRIDES.md).
 
 The port ships as a single `campfire` executable (plus libvips and ffmpeg). It replaces Ruby, Puma,
 Redis, Resque and Thruster. Against the Rails app it replaces, it serves pages, posts and real-time
-delivery 20–95× faster, and holds 10,000 connected clients in a fifth of the memory.
+delivery 25–166× faster, and holds 10,000 connected clients in about a sixth of the memory.
 
 ## What was done
 
@@ -71,11 +71,13 @@ the web app manifest, allowlisted as a deliberate difference (`parity/allowlist.
 
 ## Performance
 
-These numbers come from benchmarking the [`v0.1.2`](https://github.com/basecamp/once-campfire-rust/releases/tag/v0.1.2)
-image against the Rails app: production images of both, the same seed data, the same 4 pinned
+These numbers come from benchmarking Rust at
+[`1ea6d6f`](https://github.com/basecamp/once-campfire-rust/commit/1ea6d6f6b24fd21e7d01e69b7c92df5c380bcbde),
+including Daniel Collin's [#43](https://github.com/basecamp/once-campfire-rust/pull/43), against the
+Rails app: production images of both, the same seed data, the same 4 pinned
 hardware threads, host networking, and 3 interleaved runs per app. The medians are below; the full
 tables with spreads are in
-[`bench/results/v0.1.2-20260929/report.md`](bench/results/v0.1.2-20260929/report.md). The host ran
+[`bench/results/emoon-pr43-production-20261001/report.md`](bench/results/emoon-pr43-production-20261001/report.md). The host ran
 other work on other cores during the run. The Rust app's throughput stays within a few percent
 between runs and its process memory within about 10%. The container's memory (`memory.current`,
 which counts the page cache) and a few latency and connect-time cells vary more; the report has
@@ -85,76 +87,80 @@ every range. Some of Rails' numbers swung widely (noted below).
 
 | Route | Rails | Rust | Rust advantage |
 |---|---|---|---|
-| Room page | 212 req/s | 20,213 req/s | **95×** |
-| Messages page (`?before=`) | 411 req/s | 23,092 req/s | **56×** |
-| Sidebar | 529 req/s | 22,634 req/s | **43×** |
-| Search | 390 req/s | 23,276 req/s | **60×** |
-| Post a message | 264 req/s | 5,494 req/s | **21×** |
-| `/up` | 4,062 req/s | 131,390 req/s | **32×** |
+| Room page | 217 req/s | 36,120 req/s | **166×** |
+| Messages page (`?before=`) | 403 req/s | 41,352 req/s | **103×** |
+| Sidebar | 524 req/s | 34,339 req/s | **65×** |
+| Search | 376 req/s | 33,510 req/s | **89×** |
+| Post a message | 269 req/s | 6,817 req/s | **25×** |
+| `/up` | 4,068 req/s | 233,085 req/s | **57×** |
 
 ### Latency
 
 | Measurement | Rails | Rust | Rust advantage |
 |---|---|---|---|
-| Room page p50, one client | 10.4 ms | 0.19 ms | **54×** |
-| Room page p99, 64 clients | 461 ms | 5.2 ms | **88×** |
-| Post a message p99, one client | 13.8 ms | 1.70 ms | **8×** |
-| Post a message p99, 64 clients | 385 ms | 17.5 ms | **22×** |
-| Upload a 505 KB JPEG until its thumbnail is served | 122 ms | 29.1 ms | **4.2×** |
+| Room page p50, one client | 10.5 ms | 0.11 ms | **96×** |
+| Room page p99, 64 clients | 463 ms | 3.1 ms | **151×** |
+| Post a message p99, one client | 12.6 ms | 1.71 ms | **7×** |
+| Post a message p99, 64 clients | 381 ms | 13.9 ms | **27×** |
+| Upload a 505 KB JPEG until its thumbnail is served | 107 ms | 27.6 ms | **3.9×** |
 
 ### Real time (Action Cable, up to 10,000 clients in one room)
 
 | Measurement | Rails | Rust | Rust advantage |
 |---|---|---|---|
-| Deliveries per second, 100 clients | 7,858 | 305,061 | **39×** |
-| Deliveries per second, 1,000 clients | 12,328 | 513,332 | **42×** |
-| Deliveries per second, 5,000 clients | 10,256 | 594,554 | **58×** |
-| Deliveries per second, 10,000 clients | 9,485 | 656,183 | **69×** |
-| Post to all 1,000 clients received, p50 | 101 ms | 6.4 ms | **16×** |
-| Post to all 10,000 clients received, p50 | 3,635 ms* | 40 ms | **91×*** |
-| Post to all 10,000 clients received, p99 | 5,489 ms* | 57 ms | **96×*** |
-| Connect and subscribe 10,000 clients | 29.2 s | 1.6 s | **18×** |
+| Deliveries per second, 100 clients | 8,107 | 381,065 | **47×** |
+| Deliveries per second, 1,000 clients | 11,473 | 551,187 | **48×** |
+| Deliveries per second, 5,000 clients | 11,523 | 629,848 | **55×** |
+| Deliveries per second, 10,000 clients | 9,167 | 671,674 | **73×** |
+| Post to all 1,000 clients received, p50 | 97.8 ms | 6.5 ms | **15×** |
+| Post to all 10,000 clients received, p50 | 1,823 ms* | 39.6 ms | **46×*** |
+| Post to all 10,000 clients received, p99 | 2,644 ms* | 61.1 ms | **43×*** |
+| Connect and subscribe 10,000 clients | 29.5 s | 1.4 s | **21×** |
 
-Every Rust client subscribed in every run; Rails missed one of 10,000 in one run. \* Rails' 10,000-client delivery latency
-swung between runs (p50 from 2.5 to 5.0 s); in the previous benchmark it was 1.2 s at p50 and 1.5 s
-at p99, which would make these ratios about 29× and 27×.
+Every client subscribed in every run. \* Rails' 10,000-client delivery latency varied between
+runs (p50 from 1.4 to 3.1 s); Rust's p50 stayed between 38.8 and 41.0 ms. The report records all
+the ranges.
 
 ### Startup and memory
 
 | Measurement | Rails | Rust | Rust advantage |
 |---|---|---|---|
-| Cold start (`docker run` until `/up` answers) | 2,607 ms | 143 ms | **18×** |
-| Idle memory (container) | 355 MB | 15 MB | **24×** |
-| App process, 1,000 idle cable clients (Pss) | 656 MB | 186 MB | **3.5×** |
-| App process, 10,000 idle cable clients (Pss) | 1,469 MB | 327 MB | **4.5×** |
-| App process, 10,000 cable clients under load (Pss) | 2,199 MB | 324 MB | **6.8×** |
-| Whole container, 10,000 cable clients under load (Pss) | 3,340 MB | 324 MB | **10×** |
-| Image size, unpacked | 933 MB | 169 MB | **5.5×** |
-| Image size, compressed download | 359 MB | 67 MB | **5.4×** |
+| Cold start (`docker run` until `/up` answers) | 2,731 ms | 157 ms | **17×** |
+| Idle memory (container) | 393 MB | 20 MB | **20×** |
+| App process, 1,000 idle cable clients (Pss) | 657 MB | 124 MB | **5.3×** |
+| App process, 10,000 idle cable clients (Pss) | 1,485 MB | 250 MB | **5.9×** |
+| App process, 10,000 cable clients under load (Pss) | 2,096 MB | 248 MB | **8.5×** |
+| Whole container, 10,000 cable clients under load (Pss) | 3,182 MB | 248 MB | **13×** |
+| Image size, unpacked | 933 MB | 168 MB | **5.5×** |
+| Image size, compressed download | 359 MB | 67 MB | **5.3×** |
 
 Rails' whole container adds Redis and Thruster to its app processes; the Rust app is one process.
+Image sizes use filesystem layer usage and compressed layer bytes, recorded in
+[`sizes.json`](bench/results/emoon-pr43-production-20261001/sizes.json).
 
 ### Since the previous benchmarks
 
-The run before these benchmarked `main` at `898653e` the same way
+An earlier run benchmarked `main` at `898653e` the same way
 ([`bench/results/scale-20260927`](bench/results/scale-20260927/report.md)). Since then came
 [cached page parts](#gzip-and-etags-from-cached-page-parts), [the new WebSocket
 layer](#100000-clients-and-a-raspberry-pi-5), opting out of transparent huge pages
 ([`bench/results/thp-20260928`](bench/results/thp-20260928/report.md)), and keeping every page's
-compressed form ([`bench/results/whole-page-parts-20260929`](bench/results/whole-page-parts-20260929/summary.md)):
+compressed form ([`bench/results/whole-page-parts-20260929`](bench/results/whole-page-parts-20260929/summary.md)),
+then the short reads and recorded rendering in [#43](https://github.com/basecamp/once-campfire-rust/pull/43):
 
-| Rust app | `898653e` | `v0.1.1` | `v0.1.2` |
-|---|---|---|---|
-| Room page, 16 clients | 6,002 req/s | 20,479 req/s | 20,213 req/s |
-| Sidebar, 16 clients | 11,550 req/s | 12,642 req/s | **22,634 req/s** |
-| Search, 16 clients | 8,970 req/s | 23,399 req/s | 23,276 req/s |
-| Deliveries per second, 10,000 clients | 379,608 | 638,688 | 656,183 |
-| Post to all 10,000 clients received, p50 | 42 ms | 40 ms | 40 ms |
-| Idle memory (container) | 47 MB | 15 MB | 15 MB |
-| App process, 10,000 idle cable clients (Pss) | 582 MB | 313 MB | 327 MB |
-| App process, 10,000 cable clients under load (Pss) | 876 MB | 310 MB | 324 MB |
+| Rust app | `898653e` | `v0.1.1` | `v0.1.2` | `1ea6d6f` (#43) |
+|---|---|---|---|---|
+| Room page, 16 clients | 6,002 req/s | 20,479 req/s | 20,213 req/s | **36,120 req/s** |
+| Sidebar, 16 clients | 11,550 req/s | 12,642 req/s | 22,634 req/s | **34,339 req/s** |
+| Search, 16 clients | 8,970 req/s | 23,399 req/s | 23,276 req/s | **33,510 req/s** |
+| Deliveries per second, 10,000 clients | 379,608 | 638,688 | 656,183 | **671,674** |
+| Post to all 10,000 clients received, p50 | 42 ms | 40 ms | 40 ms | 40 ms |
+| Idle memory (container) | 47 MB | 15 MB | 15 MB | 20 MB |
+| App process, 10,000 idle cable clients (Pss) | 582 MB | 313 MB | 327 MB | **250 MB** |
+| App process, 10,000 cable clients under load (Pss) | 876 MB | 310 MB | 324 MB | **248 MB** |
 
 The `v0.1.1` numbers are from [`bench/results/v0.1.1-20260928`](bench/results/v0.1.1-20260928/report.md).
+The `v0.1.2` numbers are from [`bench/results/v0.1.2-20260929`](bench/results/v0.1.2-20260929/report.md).
 
 ### 100,000 clients, and a Raspberry Pi 5
 
@@ -203,8 +209,25 @@ In the order they landed:
 | Cable: own WebSocket framing with shared, once-compressed frames; connections on their own runtime ([above](#100000-clients-and-a-raspberry-pi-5)) | 100,000 clients in 1.6 GB instead of 5.9 GB while fanning out; a post during a 100,000-client fan-out 637 → 43 ms; frames 10 KB → 2.3 KB on the wire |
 | Keep the compressed form of every page, not only pages with cached messages ([`bench/results/whole-page-parts-20260929`](bench/results/whole-page-parts-20260929/summary.md)) | Sidebar 10,683 → 19,400 req/s (1.8×); it spent 41% of its CPU compressing the same page again |
 | No transparent huge pages for the process or jemalloc ([`bench/results/thp-20260928`](bench/results/thp-20260928/report.md)) | Idle memory 37 → 11 MB on two cores and 160 → 15 MB on 32, where the kernel's THP setting is `always`; throughput unchanged |
+| Short reads on the calling worker when a reader is free; larger reads stay offloaded | 9–12% less CPU per request on room, messages, sidebar and posting workloads |
+| Read users, sessions, accounts, boosts and rich texts by column position | `User::find` uses 46% less CPU |
+| Static rich-text safe lists, one sanitize per email address, and borrowed tag and attribute names | Room and messages pages use 4–5% less CPU with the fragment cache off |
+| Write fragment cache keys into a reused buffer | Room page uses 5% less CPU; messages page 9% less |
+| Borrow HTML attributes and render into one sized buffer | Sidebar uses 12% less CPU; room page 4% less |
+| Record cached fragments while rendering; combine their CRCs and reuse gzip for repeated bodies | Room page uses 20% less CPU; messages page 21% less |
+| Disable SQLite memory mapping so readers don't remap the file after each commit | Posting uses 13% less CPU |
 
-Against Rails, the room page went from 4.4× in the preliminary benchmark to 95× in the latest one.
+Daniel Collin ([@emoon](https://github.com/emoon)) contributed the last seven changes in
+[#43](https://github.com/basecamp/once-campfire-rust/pull/43). Their individual figures compare each
+commit with its parent, so they don't add up. Together, our three interleaved native runs measured
+23% less CPU per room and messages page, 7% less per sidebar and 14% less per post at 16 clients.
+Room and messages throughput rose 35% and 34%; p99 latency improved on all four workloads at both
+16 and 64 clients. Commands, raw results and validation are in
+[`bench/results/emoon-pr43-integration-20261001`](bench/results/emoon-pr43-integration-20261001/report.md);
+Daniel's original five-run comparison is in
+[`bench/results/inline-reads-recorded-parts-20260930`](bench/results/inline-reads-recorded-parts-20260930/summary.md).
+
+Against Rails, the room page went from 4.4× in the preliminary benchmark to 166× in the latest one.
 
 ### gzip and ETags from cached page parts
 

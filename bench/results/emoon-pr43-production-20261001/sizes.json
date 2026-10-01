@@ -1,0 +1,129 @@
+{
+  "method": "Unpacked size sums filesystem layer usage from Docker image history. Compressed size sums encoded image layer bytes from docker image save. Decoded gzip streams were checksummed and their tar sizes recorded separately. Decimal MB; metadata and optional attestations excluded.",
+  "images": {
+    "campfire-rust:bench-emoon-pr43": {
+      "compressed_layer_bytes": 67251139,
+      "uncompressed_layer_bytes": 161150976,
+      "layers": [
+        {
+          "digest": "6b37362b3da78869050b894b799ad4df04f1f3b52774087db0d81151570244c8",
+          "compressed_bytes": 29830418,
+          "uncompressed_bytes": 81244160
+        },
+        {
+          "digest": "edf09fbbaa1eb276fecb5f2d4af42076e311de1aaf6ee99c5b4bb18e5fa608c6",
+          "compressed_bytes": 8163588,
+          "uncompressed_bytes": 21944320
+        },
+        {
+          "digest": "01c40ae3c6721917284243e25a8348cf85e04a4efeb4115dbc72dbdbd504667e",
+          "compressed_bytes": 9370359,
+          "uncompressed_bytes": 20549120
+        },
+        {
+          "digest": "fa6fe050c94a210105f00e196e140a33405c9251d23f2a52521f1fe4b4e7dca4",
+          "compressed_bytes": 3389,
+          "uncompressed_bytes": 17408
+        },
+        {
+          "digest": "9f51b298d93fb84e22e21ada903cd88700e17661b6d23ad971990205f48c00f1",
+          "compressed_bytes": 3339,
+          "uncompressed_bytes": 21504
+        },
+        {
+          "digest": "76045095963f439ff712723b99bbc2cbe12f5fea645262ae3acb75c515d4e0ad",
+          "compressed_bytes": 94,
+          "uncompressed_bytes": 1536
+        },
+        {
+          "digest": "79a04b06e24ed27e2d8efd0e7f28c8736bdfe3e40a8974bfc670cd79bc285674",
+          "compressed_bytes": 19879034,
+          "uncompressed_bytes": 37359616
+        },
+        {
+          "digest": "98afd5588b86eeadd78875b6977a7cefd0fb2c08c525afd5af318e68b0c704d5",
+          "compressed_bytes": 177,
+          "uncompressed_bytes": 3072
+        },
+        {
+          "digest": "4e059fd43b1c96788c7ae80a592ca9f35279a93a4ca429dd9e7f638fa669987f",
+          "compressed_bytes": 244,
+          "uncompressed_bytes": 5120
+        },
+        {
+          "digest": "46e967b6e0e9b26151ee2f8ee71e12d001b234b15f4d1a59a32ce8f149e40801",
+          "compressed_bytes": 180,
+          "uncompressed_bytes": 2560
+        },
+        {
+          "digest": "5e0d2241f367fc94f8c51a7f755c27cb34c7c3c2212fd7104a10fc61cf902c62",
+          "compressed_bytes": 317,
+          "uncompressed_bytes": 2560
+        }
+      ],
+      "unpacked_filesystem_layer_bytes": 168497152
+    },
+    "campfire-reference:bench-898653e": {
+      "compressed_layer_bytes": 358584425,
+      "uncompressed_layer_bytes": 886591488,
+      "layers": [
+        {
+          "digest": "6b37362b3da78869050b894b799ad4df04f1f3b52774087db0d81151570244c8",
+          "compressed_bytes": 29830418,
+          "uncompressed_bytes": 81244160
+        },
+        {
+          "digest": "d056276a8ddda594c12a00c59f402ac56cdb02d334f3ff60ae2e0630e09ac0fb",
+          "compressed_bytes": 1280871,
+          "uncompressed_bytes": 4095488
+        },
+        {
+          "digest": "2c69855049b0e60ae314c1552716d8ffb9ed6bd82c388a831ce924d1cfa54635",
+          "compressed_bytes": 189,
+          "uncompressed_bytes": 3584
+        },
+        {
+          "digest": "3906e1de0ba8935db212a03e44085181f1b0bd6518d36c3b21ed40633ac43de3",
+          "compressed_bytes": 42163780,
+          "uncompressed_bytes": 77104128
+        },
+        {
+          "digest": "5e652de9281783fd75733e192a2d1491ec8e937891fa6cc88f822c91e0b355a9",
+          "compressed_bytes": 142,
+          "uncompressed_bytes": 2560
+        },
+        {
+          "digest": "ecfbdd90a623889b43c660e17686a439094e087635cb35296d3b72835f0dce79",
+          "compressed_bytes": 94,
+          "uncompressed_bytes": 1536
+        },
+        {
+          "digest": "f4b89db63fd3c009f05538588979c167bdbe2d28f461c2f6eee15ba5f76d91ab",
+          "compressed_bytes": 199193209,
+          "uncompressed_bytes": 513119744
+        },
+        {
+          "digest": "9e01fff2b6332b35199822a56dd40c3490e2b6dbc24acaf3b86489ccc45a1ac2",
+          "compressed_bytes": 3385,
+          "uncompressed_bytes": 22016
+        },
+        {
+          "digest": "89cba9c640b4358cbac7ec8b1164b1a556a27a3108db1e03612342d9a4e5dc83",
+          "compressed_bytes": 65573594,
+          "uncompressed_bytes": 183432704
+        },
+        {
+          "digest": "d03f998457ad0819e7cbe3bffefd8d3f2c80241bafd5509c041a8cec66600f73",
+          "compressed_bytes": 20538381,
+          "uncompressed_bytes": 27561984
+        },
+        {
+          "digest": "1a174e801ead76d8c483616ff11d0b49c7b0484176e5fc4e0bcabd21a8bc90c1",
+          "compressed_bytes": 362,
+          "uncompressed_bytes": 3584
+        }
+      ],
+      "unpacked_filesystem_layer_bytes": 932900864
+    }
+  }
+}

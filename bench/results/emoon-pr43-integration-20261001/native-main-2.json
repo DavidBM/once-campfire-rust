@@ -1,0 +1,267 @@
+{
+ "config": "native-main",
+ "rep": 2,
+ "cold_start_s": 0.051,
+ "pids": {
+  "campfire": 1859896
+ },
+ "load_start": [
+  "9.01",
+  "5.91",
+  "3.25"
+ ],
+ "idle": {
+  "VmHWM": 45.6171875,
+  "VmRSS": 45.6171875,
+  "RssAnon": 16.17578125,
+  "Threads": 14.0
+ },
+ "http": [
+  {
+   "avg_bytes": 24231,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 2.895,
+    "mean_ms": 0.62,
+    "n": 129795,
+    "p50_ms": 0.585,
+    "p90_ms": 0.839,
+    "p99_ms": 1.248
+   },
+   "ok": 129795,
+   "path": "/rooms/486777696",
+   "rps": 25956.0,
+   "secs": 5.0,
+   "statuses": {
+    "200": 129795
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1391,
+    "loadgen": 0.0111
+   },
+   "cpu_cores": {
+    "campfire": 3.61,
+    "loadgen": 0.29
+   },
+   "route": "room_show"
+  },
+  {
+   "avg_bytes": 24231,
+   "conc": 64,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 6.699,
+    "mean_ms": 2.23,
+    "n": 142920,
+    "p50_ms": 2.163,
+    "p90_ms": 2.967,
+    "p99_ms": 3.941
+   },
+   "ok": 142920,
+   "path": "/rooms/486777696",
+   "rps": 28571.7,
+   "secs": 5.0,
+   "statuses": {
+    "200": 142920
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1325,
+    "loadgen": 0.012
+   },
+   "cpu_cores": {
+    "campfire": 3.79,
+    "loadgen": 0.34
+   },
+   "route": "room_show"
+  },
+  {
+   "avg_bytes": 16158,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 2.267,
+    "mean_ms": 0.52,
+    "n": 152278,
+    "p50_ms": 0.497,
+    "p90_ms": 0.703,
+    "p99_ms": 1.031
+   },
+   "ok": 152278,
+   "path": "/rooms/486777696/messages?before=933434569",
+   "rps": 30452.9,
+   "secs": 5.0,
+   "statuses": {
+    "200": 152278
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.119,
+    "loadgen": 0.0108
+   },
+   "cpu_cores": {
+    "campfire": 3.62,
+    "loadgen": 0.33
+   },
+   "route": "messages_page"
+  },
+  {
+   "avg_bytes": 16158,
+   "conc": 64,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 5.979,
+    "mean_ms": 1.9,
+    "n": 168009,
+    "p50_ms": 1.825,
+    "p90_ms": 2.455,
+    "p99_ms": 3.325
+   },
+   "ok": 168009,
+   "path": "/rooms/486777696/messages?before=933434569",
+   "rps": 33590.1,
+   "secs": 5.0,
+   "statuses": {
+    "200": 168009
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1123,
+    "loadgen": 0.0113
+   },
+   "cpu_cores": {
+    "campfire": 3.77,
+    "loadgen": 0.38
+   },
+   "route": "messages_page"
+  },
+  {
+   "avg_bytes": 5910,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 2.909,
+    "mean_ms": 0.54,
+    "n": 147892,
+    "p50_ms": 0.504,
+    "p90_ms": 0.767,
+    "p99_ms": 1.162
+   },
+   "ok": 147892,
+   "path": "/users/me/sidebar",
+   "rps": 29575.2,
+   "secs": 5.0,
+   "statuses": {
+    "200": 147892
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1205,
+    "loadgen": 0.0104
+   },
+   "cpu_cores": {
+    "campfire": 3.56,
+    "loadgen": 0.31
+   },
+   "route": "sidebar"
+  },
+  {
+   "avg_bytes": 5910,
+   "conc": 64,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 6.331,
+    "mean_ms": 1.89,
+    "n": 169064,
+    "p50_ms": 1.81,
+    "p90_ms": 2.525,
+    "p99_ms": 3.439
+   },
+   "ok": 169064,
+   "path": "/users/me/sidebar",
+   "rps": 33799.1,
+   "secs": 5.0,
+   "statuses": {
+    "200": 169064
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.1113,
+    "loadgen": 0.0109
+   },
+   "cpu_cores": {
+    "campfire": 3.76,
+    "loadgen": 0.37
+   },
+   "route": "sidebar"
+  },
+  {
+   "avg_bytes": 1992,
+   "conc": 16,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 9.111,
+    "mean_ms": 2.63,
+    "n": 30406,
+    "p50_ms": 2.381,
+    "p90_ms": 3.749,
+    "p99_ms": 6.967
+   },
+   "ok": 30406,
+   "path": "POST /rooms/201306877/messages",
+   "rps": 6077.9,
+   "secs": 5.0,
+   "statuses": {
+    "200": 30406
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.4453,
+    "loadgen": 0.0157
+   },
+   "cpu_cores": {
+    "campfire": 2.71,
+    "loadgen": 0.1
+   },
+   "route": "post_message"
+  },
+  {
+   "avg_bytes": 1992,
+   "conc": 64,
+   "errors": 0,
+   "gzip": true,
+   "latency": {
+    "max_ms": 24.175,
+    "mean_ms": 10.04,
+    "n": 31803,
+    "p50_ms": 9.815,
+    "p90_ms": 12.367,
+    "p99_ms": 15.671
+   },
+   "ok": 31803,
+   "path": "POST /rooms/201306877/messages",
+   "rps": 6347.7,
+   "secs": 5.01,
+   "statuses": {
+    "200": 31803
+   },
+   "cpu_ms_per_req": {
+    "campfire": 0.4405,
+    "loadgen": 0.0181
+   },
+   "cpu_cores": {
+    "campfire": 2.8,
+    "loadgen": 0.11
+   },
+   "route": "post_message"
+  }
+ ],
+ "cable": [],
+ "load_end": [
+  "8.73",
+  "6.24",
+  "3.50"
+ ]
+}

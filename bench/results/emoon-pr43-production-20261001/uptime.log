@@ -1,0 +1,12 @@
+20:38:33 reference rep 1 start:  20:38:33 up 5 days, 27 min,  4 users,  load average: 0.53, 0.58, 0.41
+20:45:20 reference rep 1 end:    20:45:20 up 5 days, 34 min,  4 users,  load average: 4.23, 2.85, 1.52
+20:45:20 rust rep 1 start:  20:45:20 up 5 days, 34 min,  4 users,  load average: 4.23, 2.85, 1.52
+20:50:41 rust rep 1 end:    20:50:41 up 5 days, 40 min,  4 users,  load average: 6.02, 4.68, 2.68
+20:50:41 rust rep 2 start:  20:50:41 up 5 days, 40 min,  4 users,  load average: 6.02, 4.68, 2.68
+20:56:03 rust rep 2 end:    20:56:03 up 5 days, 45 min,  4 users,  load average: 6.04, 5.21, 3.45
+20:56:03 reference rep 2 start:  20:56:03 up 5 days, 45 min,  4 users,  load average: 6.04, 5.21, 3.45
+21:03:03 reference rep 2 end:    21:03:03 up 5 days, 52 min,  4 users,  load average: 3.27, 4.16, 3.64
+21:03:03 reference rep 3 start:  21:03:03 up 5 days, 52 min,  4 users,  load average: 3.27, 4.16, 3.64
+21:09:57 reference rep 3 end:    21:09:57 up 5 days, 59 min,  4 users,  load average: 2.83, 3.58, 3.61
+21:09:57 rust rep 3 start:  21:09:57 up 5 days, 59 min,  4 users,  load average: 2.83, 3.58, 3.61
+21:15:19 rust rep 3 end:    21:15:19 up 5 days,  1:04,  4 users,  load average: 4.72, 4.54, 4.01
