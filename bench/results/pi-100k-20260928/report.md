@@ -1,7 +1,8 @@
 # 100,000 cable clients, and a Raspberry Pi 5's budget
 
 How many chat clients one Campfire can hold, with a Raspberry Pi 5 (4 × Cortex-A76, 8 GB, NVMe,
-gigabit Ethernet) as the target. No Pi was available, so it's emulated here: the app on 4 pinned
+gigabit Ethernet) as the target. No Pi was available: this is a resource-budget approximation,
+not hardware emulation. The app runs on 4 pinned
 cores of a Ryzen AI Max+ 395 under a cgroup quota of 1.2 cores (`CPUQuota=120%`,
 `PI=1` in [`run100k.sh`](run100k.sh)) and 8 GB. By Geekbench 6 a Pi 5 core is about 3.5× slower than one
 of these, so its four cores are worth roughly 1.2 here. The network can't be throttled without
@@ -42,10 +43,16 @@ On the Pi budget:
 - connecting all 100,000 took 12.9 s at 0.9 cores;
 - a message frame was 2,284 bytes on the wire compressed, against ~10 KB uncompressed.
 
-## What limits a Pi 5
+Memory figures above are the application's Pss from `/proc/PID/smaps_rollup`, not total system
+memory: they exclude kernel socket structures and TCP buffers. The 8 GB cgroup limit also accounts
+for kernel memory and TCP buffers, but their usage and total cgroup memory were not recorded.
+The run used loopback networking, plain HTTP without TLS, and one user for all clients.
 
-**The network, not the CPU or memory.** Gigabit Ethernet carries ~117 MB/s: about 51,000
-compressed deliveries a second (12,000 uncompressed). The CPU budget handles over a million.
+## Estimated network budget
+
+At an assumed usable ~117 MB/s, gigabit Ethernet allows about 51,000 compressed deliveries a
+second (12,000 uncompressed) for these message sizes. This is a bandwidth estimate; it does not
+establish that a Pi's CPU, memory or network stack can sustain those rates.
 
 A delivery is one message to one client, so the load is messages/s × people in the room.
 
@@ -55,13 +62,21 @@ A delivery is one message to one client, so the load is messages/s × people in 
 | 100 rooms of 1,000 | 333,000 | no |
 | Everyone in one room | at most 0.5 messages/s in total | — |
 
-So a Pi 5 can hold 100,000 connected chatters, and serve them while their conversations are spread
-over rooms of a few hundred. A single room of 100,000 can't be busy on one gigabit link: each
-message is 230 MB of traffic.
+The tested Linux host held 100,000 connections under the stated resource caps. Capacity on a
+real Pi 5 remains unverified, including conversations spread across smaller rooms. A single room
+of 100,000 would require about 230 MB of traffic per message with these compressed frame sizes.
+
+Linux has no 65,535-connection ceiling for a listening port: TCP connections are distinguished
+by local and remote address/port pairs. The app raises its soft file-descriptor limit to its hard
+limit; the hard limit must exceed 100,000 with room for other files. System file-handle limits,
+kernel/socket memory, TLS and real network conditions also need checking on the target Pi.
+See the [TCP specification](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.4.1),
+[Linux file-handle limits](https://docs.kernel.org/admin-guide/sysctl/fs.html#nr-open), and
+[cgroup memory accounting](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory).
 
 ## Not yet measured
 
-- On real Pi hardware. The image needs an arm64 build, with jemalloc configured for the Pi 5
-  kernel's 16 KB pages.
+- On real Pi hardware, with TLS, external load generators and total kernel/socket memory measured.
+  The current Dockerfile configures arm64 jemalloc for 16 KB pages, but that image was not tested here.
 - With 100,000 distinct users (here all clients are one user, so presence writes hit one row).
 - Page loads and posts from many users at once, on top of the fan-out.
