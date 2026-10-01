@@ -161,10 +161,6 @@ pub enum MessageItem {
     View(Box<MessageView>),
 }
 
-/// What a message that isn't cached yet is taken to render to: its fragment is 9-11 KB in the
-/// parity seed's rooms and in the benchmark's.
-const UNCACHED_MESSAGE_LEN: usize = 12 * 1024;
-
 impl MessageItem {
     /// `dom_id(message)` / `dom_id(message, prefix)`.
     pub fn dom_id(&self, prefix: &str) -> String {
@@ -180,30 +176,6 @@ impl MessageItem {
             MessageItem::Fragment { room_id, .. } => *room_id,
             MessageItem::View(message) => message.room_id,
         }
-    }
-
-    /// What `items` render to: their fragments, and a guess for the ones not cached yet.
-    pub fn html_len(items: &[MessageItem]) -> usize {
-        items
-            .iter()
-            .map(|item| match item {
-                MessageItem::Fragment { html, .. } => html.len(),
-                MessageItem::View(_) => UNCACHED_MESSAGE_LEN,
-            })
-            .sum()
-    }
-
-    /// The cached fragments of a rendered page's `items`, in order, including those this render
-    /// just stored in `cache`: they're in the page as they are. Call it after rendering, so the
-    /// page's parts (and its ETag) don't depend on which messages happened to be cached before.
-    pub fn cached_fragments(cache: &fragment_cache::FragmentCache, items: &[MessageItem]) -> Vec<fragment_cache::Fragment> {
-        items
-            .iter()
-            .filter_map(|item| match item {
-                MessageItem::Fragment { html, .. } => Some(html.clone()),
-                MessageItem::View(message) => cache.get(&message_fragment_key(message.id, message.updated_at)),
-            })
-            .collect()
     }
 }
 
@@ -306,56 +278,51 @@ pub struct MessagePartial<'a> {
 
 /// `render message`: `messages/_message`, whose body is `cache [ message, "presentation-v3" ]`
 /// (and whose collection renders are `cached: true`), so a message version renders once.
-pub fn message(ctx: &ViewContext, message: &MessageView) -> String {
+pub fn message(ctx: &ViewContext, message: &MessageView) -> fragment_cache::Fragment {
     fragment_cache::fetch(
-        || message_fragment_key(message.id, message.updated_at),
+        |key| message_fragment_key(key, message.id, message.updated_at),
         || MessagePartial { ctx, message }.render().expect("messages/_message renders"),
     )
 }
 
 /// [`message`] where a template renders the partial.
-pub fn cached_message(ctx: &ViewContext, message: &MessageView) -> crate::helpers::Html {
+pub fn cached_message(ctx: &ViewContext, message: &MessageView) -> askama::filters::Safe<fragment_cache::Fragment> {
     askama::filters::Safe(self::message(ctx, message))
 }
 
-/// [`cached_message`] for a [`MessageItem`]: a fragment found up front goes out as it is.
-pub fn cached_message_item<'a>(ctx: &ViewContext, item: &'a MessageItem) -> askama::filters::Safe<std::borrow::Cow<'a, str>> {
-    askama::filters::Safe(match item {
-        MessageItem::Fragment { html, .. } => std::borrow::Cow::Borrowed(html.as_str()),
-        MessageItem::View(message) => std::borrow::Cow::Owned(self::message(ctx, message)),
-    })
+/// [`cached_message`] for a [`MessageItem`]: a fragment found up front goes out as it is. A page
+/// being [`recorded`](crate::recorded) notes where the fragment goes instead of copying it in.
+pub fn cached_message_item(ctx: &ViewContext, item: &MessageItem) -> askama::filters::Safe<fragment_cache::Fragment> {
+    let fragment = match item {
+        MessageItem::Fragment { html, .. } => html.clone(),
+        MessageItem::View(message) => self::message(ctx, message),
+    };
+    crate::recorded::hand(&fragment);
+    askama::filters::Safe(fragment)
 }
 
 /// `messages/_message`'s fragment for this message version, if the current store holds it. The
 /// key needs only the message's id and `updated_at`.
 pub fn cached_message_fragment(id: i64, updated_at: Timestamp) -> Option<fragment_cache::Fragment> {
-    fragment_cache::read(&message_fragment_key(id, updated_at))
+    fragment_cache::read(|key| message_fragment_key(key, id, updated_at))
 }
 
-fn message_fragment_key(id: i64, updated_at: Timestamp) -> String {
-    format!(
-        "views/messages/_message:{}/{}/presentation-v3",
-        message_digest(),
-        fragment_cache::cache_key_with_version("messages", id, updated_at)
-    )
+/// `views/messages/_message:<digest>/messages/<id>-<version>/presentation-v3`.
+fn message_fragment_key(key: &mut String, id: i64, updated_at: Timestamp) {
+    fragment_cache::push_record_fragment_key(key, "messages/_message", message_digest(), "messages", id, updated_at);
+    key.push_str("/presentation-v3");
 }
 
 /// `messages/boosts/_boost`, whose body is `cache boost`.
-pub fn boost(ctx: &ViewContext, boost: &BoostView) -> String {
+pub fn boost(ctx: &ViewContext, boost: &BoostView) -> fragment_cache::Fragment {
     fragment_cache::fetch(
-        || {
-            format!(
-                "views/messages/boosts/_boost:{}/{}",
-                boost_digest(),
-                fragment_cache::cache_key_with_version("boosts", boost.id, boost.updated_at)
-            )
-        },
+        |key| fragment_cache::push_record_fragment_key(key, "messages/boosts/_boost", boost_digest(), "boosts", boost.id, boost.updated_at),
         || BoostPartial { ctx, boost }.render().expect("messages/boosts/_boost renders"),
     )
 }
 
 /// [`boost`] where a template renders the partial.
-pub fn cached_boost(ctx: &ViewContext, boost: &BoostView) -> crate::helpers::Html {
+pub fn cached_boost(ctx: &ViewContext, boost: &BoostView) -> askama::filters::Safe<fragment_cache::Fragment> {
     askama::filters::Safe(self::boost(ctx, boost))
 }
 
@@ -386,14 +353,6 @@ fn boost_digest() -> &'static str {
 pub struct Index<'a> {
     pub ctx: &'a ViewContext<'a>,
     pub messages: &'a [MessageItem],
-}
-
-impl Index<'_> {
-    /// Renders into a buffer with room for the messages and the line after each one (see
-    /// [`crate::layouts::render_with_capacity`]).
-    pub fn render_presized(&self) -> askama::Result<String> {
-        crate::layouts::render_with_capacity(self, MessageItem::html_len(self.messages) + self.messages.len())
-    }
 }
 
 /// `messages/show`: the message partial, inside the application layout.

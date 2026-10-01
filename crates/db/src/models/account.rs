@@ -1,11 +1,11 @@
 //! `reference/app/models/account.rb` and `account/joinable.rb`.
 
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, params};
 use serde_json::{Map, Value};
 
 use crate::database::Tx;
 use crate::error::{Error, OptionalExt, Result};
-use crate::sql::{self, CachedStatements, query_one};
+use crate::sql::{self, CachedStatements, columns, query_one};
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,27 +87,38 @@ fn present(value: Option<&Value>) -> bool {
     }
 }
 
-impl Account {
-    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            join_code: row.get("join_code")?,
-            custom_styles: row.get("custom_styles")?,
-            settings_json: row.get("settings")?,
-            singleton_guard: row.get("singleton_guard")?,
-            created_at: row.get("created_at")?,
-            updated_at: row.get("updated_at")?,
-        })
+columns! {
+    Account, "accounts", account_columns {
+        id: "id",
+        name: "name",
+        join_code: "join_code",
+        custom_styles: "custom_styles",
+        settings_json: "settings",
+        singleton_guard: "singleton_guard",
+        created_at: "created_at",
+        updated_at: "updated_at",
     }
+}
 
+impl Account {
     /// `Account.first` (`Current.account`).
     pub fn first(conn: &Connection) -> Result<Option<Self>> {
-        query_one(conn, r#"SELECT * FROM "accounts" ORDER BY "accounts"."id" ASC LIMIT 1"#, [], Self::from_row)
+        query_one(
+            conn,
+            concat!("SELECT ", account_columns!(), r#" FROM "accounts" ORDER BY "accounts"."id" ASC LIMIT 1"#),
+            [],
+            Self::from_row,
+        )
     }
 
     pub fn find(conn: &Connection, id: i64) -> Result<Self> {
-        query_one(conn, r#"SELECT * FROM "accounts" WHERE "accounts"."id" = ? LIMIT 1"#, [id], Self::from_row)?.or_not_found("Account")
+        query_one(
+            conn,
+            concat!("SELECT ", account_columns!(), r#" FROM "accounts" WHERE "accounts"."id" = ? LIMIT 1"#),
+            [id],
+            Self::from_row,
+        )?
+        .or_not_found("Account")
     }
 
     pub fn count(conn: &Connection) -> Result<i64> {

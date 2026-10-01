@@ -1,5 +1,5 @@
 //! One writer thread that owns the write connection and takes a bounded queue of work, plus
-//! reader threads that each own a reader connection and take reads from one queue. Each write
+//! reader threads that take reads from one queue, each with a free reader connection. Each write
 //! runs in `BEGIN IMMEDIATE` (`default_transaction_mode: immediate` in
 //! `reference/config/database.yml`), then its after-commit work runs in order, outside the
 //! transaction, the way Active Record runs `after_commit` callbacks.
@@ -11,6 +11,9 @@
 //! reads taken one after the other may still start in either order), and a reader that finishes
 //! a read takes the next one without a hand-off to another thread, which is what makes it cheaper
 //! than waiting for a connection on an async semaphore (bench/results/db-hops-20260930).
+//!
+//! A read that finds a connection free, with no read queued ahead of it, skips the queue and runs
+//! on the calling task's thread instead (see [`Database::read`]).
 //!
 //! WAL checkpoints run on a checkpointer thread with a connection of its own, not on the writer.
 //! Rails keeps SQLite's auto-checkpoint: once a commit leaves the WAL at 1,000 pages or more,
@@ -271,10 +274,35 @@ impl Database {
         response.blocking_recv().map_err(|_| Error::WriterGone)?
     }
 
+    /// Runs `f` on a reader connection: right here, on the calling task's thread, when one is free
+    /// and no read is queued for one, since a read on a warm page cache takes less time than the
+    /// hop to a reader thread and back; otherwise as [`Database::read_offloaded`] does. At most as
+    /// many runtime workers as there are readers are ever inside `f`.
+    ///
+    /// Reads whose cost grows with the whole database rather than with a page (search, every
+    /// user, all of a user's messages) use [`Database::read_offloaded`], to keep them off the
+    /// runtime's workers.
+    pub async fn read<T, F>(&self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Connection) -> Result<T> + Send + 'static,
+    {
+        let Some(conn) = self.readers.queue.take_connection() else {
+            return self.read_offloaded(f).await;
+        };
+        // A panicking read fails its caller's read, as on a reader thread, and gives its connection back.
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&conn))).unwrap_or_else(|_| Err(Error::other("the read panicked")));
+        self.readers.queue.give_back(conn);
+        // Give the worker's other tasks their turn, as the hop to another thread did.
+        tokio::task::yield_now().await;
+        result
+    }
+
     /// Runs `f` on a reader thread, the next one free. Once queued, `f` runs even if its caller
     /// stops waiting (a request dropped when its client goes away), as it did on the blocking
     /// pool: some reads broadcast what a write committed, like messages#create's.
-    pub async fn read<T, F>(&self, f: F) -> Result<T>
+    pub async fn read_offloaded<T, F>(&self, f: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&Connection) -> Result<T> + Send + 'static,
@@ -409,14 +437,16 @@ impl Readers {
         // started before.
         let readers = Self { queue: Arc::default() };
         for _ in 0..count {
-            let conn = open_connection(path, true)?;
+            readers.queue.lock().connections.push(open_connection(path, true)?);
             let queue = readers.queue.clone();
             std::thread::Builder::new()
                 .name("campfire-db-reader".into())
                 .spawn(move || {
-                    while let Some(read) = queue.next() {
+                    let mut finished = None;
+                    while let Some((read, conn)) = queue.next(finished.take()) {
                         // A panicking read fails its caller's read, not the reader.
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read(&conn)));
+                        finished = Some(conn);
                     }
                 })
                 .map_err(Error::other)?;
@@ -432,7 +462,7 @@ impl Drop for Readers {
     }
 }
 
-/// The reads waiting for a reader thread, in order.
+/// The reads waiting for a reader thread, in order, and the reader connections not in use.
 #[derive(Default)]
 struct ReadQueue {
     state: Mutex<Queued>,
@@ -442,8 +472,8 @@ struct ReadQueue {
 #[derive(Default)]
 struct Queued {
     reads: VecDeque<Read>,
-    /// Reader threads waiting for a read. Queueing one wakes a reader only when there is one to
-    /// wake: std's Condvar makes a futex syscall for every notify, waiter or not.
+    connections: Vec<Connection>,
+    /// Reader threads waiting for a read and a connection to run it on.
     idle: usize,
     closed: bool,
 }
@@ -452,21 +482,44 @@ impl ReadQueue {
     fn push(&self, read: Read) {
         let mut state = self.lock();
         state.reads.push_back(read);
-        let wake = state.idle > 0;
+        self.wake_a_reader(state);
+    }
+
+    /// A connection for a read on the calling thread, unless none is free or reads are queued
+    /// (they go first).
+    fn take_connection(&self) -> Option<Connection> {
+        let mut state = self.lock();
+        if state.reads.is_empty() { state.connections.pop() } else { None }
+    }
+
+    /// Returns a connection taken by [`ReadQueue::take_connection`].
+    fn give_back(&self, conn: Connection) {
+        let mut state = self.lock();
+        state.connections.push(conn);
+        self.wake_a_reader(state);
+    }
+
+    /// Wakes a reader thread when one is waiting and there's a read and a connection for it. Only
+    /// then: std's Condvar makes a futex syscall for every notify, waiter or not.
+    fn wake_a_reader(&self, state: MutexGuard<'_, Queued>) {
+        let wake = state.idle > 0 && !state.reads.is_empty() && !state.connections.is_empty();
         drop(state);
         if wake {
             self.ready.notify_one();
         }
     }
 
-    /// The next read, once there is one; `None` once the queue is closed and empty.
-    fn next(&self) -> Option<Read> {
+    /// For a reader thread, which gives back the connection of the read it `finished`: the next
+    /// read and a connection to run it on, once there are both; `None` once the queue is closed
+    /// and empty.
+    fn next(&self, finished: Option<Connection>) -> Option<(Read, Connection)> {
         let mut state = self.lock();
+        state.connections.extend(finished);
         loop {
-            if let Some(read) = state.reads.pop_front() {
-                return Some(read);
+            if !state.reads.is_empty() && !state.connections.is_empty() {
+                return state.reads.pop_front().zip(state.connections.pop());
             }
-            if state.closed {
+            if state.closed && state.reads.is_empty() {
                 return None;
             }
             state.idle += 1;
@@ -574,7 +627,7 @@ mod tests {
                 let (release, released) = std::sync::mpsc::channel::<()>();
                 let (db, started) = (db.clone(), started.clone());
                 let holder = tokio::spawn(async move {
-                    db.read(move |_| {
+                    db.read_offloaded(move |_| {
                         started.send(()).unwrap();
                         let _ = released.recv();
                         Ok(())
@@ -683,6 +736,8 @@ mod tests {
         let db = open_with_readers(&dir, 1);
         for _ in 0..3 {
             assert!(within("the panicking read failed", db.read(|_| -> Result<()> { panic!("a bug in a read") })).await.is_err());
+            let offloaded = db.read_offloaded(|_| -> Result<()> { panic!("a bug in a read") });
+            assert!(within("the panicking offloaded read failed", offloaded).await.is_err());
         }
         assert_eq!(within("a read after the panics", db.read(select_one)).await.unwrap(), 1);
     }
@@ -744,6 +799,57 @@ mod tests {
         db.write_blocking(|tx| Ok(tx.conn().execute("INSERT INTO things VALUES (2)", [])?)).unwrap();
         let ids = db.read_blocking(|conn| Ok(conn.query_row("SELECT group_concat(id) FROM things", [], |r| r.get::<_, String>(0))?));
         assert_eq!(ids.unwrap(), "2");
+    }
+
+    #[tokio::test]
+    async fn a_read_runs_on_the_calling_thread_while_a_reader_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        let caller = std::thread::current().id();
+        assert_eq!(db.read(|_| Ok(std::thread::current().id())).await.unwrap(), caller);
+        assert_ne!(db.read_offloaded(|_| Ok(std::thread::current().id())).await.unwrap(), caller);
+    }
+
+    /// A connection that comes free while reads are queued is theirs, so a read on the calling
+    /// thread queues behind them instead of taking it.
+    #[test]
+    fn queued_reads_get_a_free_connection_first() {
+        let queue = ReadQueue::default();
+        queue.give_back(Connection::open_in_memory().unwrap());
+        queue.push(Box::new(|_| {}));
+        assert!(queue.take_connection().is_none());
+        let (_, conn) = queue.next(None).expect("the queued read, with the connection");
+        queue.give_back(conn);
+        assert!(queue.take_connection().is_some());
+    }
+
+    /// A read queued while the only connection is in use on the calling thread gets it back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_read_waits_for_a_connection_in_use_on_the_calling_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_with_readers(&dir, 1);
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (started, starting) = oneshot::channel();
+        let holder = tokio::spawn({
+            let db = db.clone();
+            async move {
+                db.read(move |_| {
+                    started.send(()).unwrap();
+                    let _ = released.recv();
+                    Ok(())
+                })
+                .await
+            }
+        });
+        within("the inline read started", starting).await.unwrap();
+        let waiting = tokio::spawn({
+            let db = db.clone();
+            async move { db.read(select_one).await }
+        });
+        until_queued(&db, 1).await;
+        drop(release);
+        within("the inline read finished", holder).await.unwrap().unwrap();
+        assert_eq!(within("the queued read ran", waiting).await.unwrap().unwrap(), 1);
     }
 
     /// Commits never checkpoint on the writer: the WAL reaching the auto-checkpoint threshold

@@ -1,7 +1,6 @@
 //! `Users::SidebarsController` (reference/app/controllers/users/sidebars_controller.rb): the room
 //! list, loaded into the `user_sidebar` turbo frame.
 
-use askama::Template;
 use campfire_db::Account;
 use campfire_kit::{Ctx, Result, StatusCode, format};
 use campfire_views::users;
@@ -40,7 +39,7 @@ pub async fn show(c: &mut Ctx) -> Result {
     view_context::page_or_frame(
         c,
         StatusCode::OK,
-        |ctx| data.page(ctx).render(),
+        |ctx| campfire_views::render_sized!(data.page(ctx)),
         |ctx| {
             let page = data.page(ctx);
             campfire_views::layouts::frame(ctx, page.as_head(), page.as_content())

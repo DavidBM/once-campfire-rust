@@ -81,5 +81,5 @@ pub async fn update(c: &mut Ctx) -> Result {
 /// `User.active.ordered`
 pub(super) async fn active_users(c: &Ctx) -> Result<Vec<campfire_views::messages::UserView>> {
     let secrets = c.app().secrets.clone();
-    c.app().read(move |conn| Ok(User::active_ordered(conn)?.iter().map(|user| user_view(&secrets, user)).collect())).await
+    c.app().read_offloaded(move |conn| Ok(User::active_ordered(conn)?.iter().map(|user| user_view(&secrets, user)).collect())).await
 }

@@ -3,12 +3,16 @@
 use ruby_compat::url_encode;
 
 use super::html::{Html, Safe, escape};
-use super::tag::{Attrs, attrs, content_tag};
+use super::tag::{Attrs, AttrsView, attrs, content_tag};
 
-/// `link_to(url, options) { content }`: `href` goes after the given options.
+/// `link_to(url, options) { content }`.
 pub fn link_to(url: &str, options: Attrs, content: &str) -> Html {
-    let options = options.attr("href", url);
-    content_tag("a", &options, content)
+    content_tag("a", link_options(url, options.view()), content)
+}
+
+/// `link_to`'s attributes: `href` goes after the given options.
+pub fn link_options<'a>(url: &'a str, options: AttrsView<'a>) -> AttrsView<'a> {
+    options.attr("href", url)
 }
 
 /// `link_to(text, url, options)` with a plain-text name.

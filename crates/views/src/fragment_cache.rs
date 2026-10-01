@@ -122,9 +122,9 @@ impl FragmentCache {
         Arc::new(Self { max_bytes, entries: Mutex::default() })
     }
 
-    /// `Rails.cache.fetch(key) { render }` for a rendered fragment.
-    pub fn fetch(&self, key: &str, render: impl FnOnce() -> String) -> String {
-        String::clone(&self.fetch_value(key, || Fragment::new(fitted(render()))))
+    /// `Rails.cache.fetch(key) { render }` for a rendered fragment, shared with the store.
+    pub fn fetch(&self, key: &str, render: impl FnOnce() -> String) -> Fragment {
+        self.fetch_value(key, || Fragment::new(fitted(render())))
     }
 
     /// `Rails.cache.fetch(key) { value }` for any cloneable value (Jbuilder caches the hash it
@@ -251,28 +251,47 @@ pub fn current() -> Option<Arc<FragmentCache>> {
     CURRENT.with(|current| current.borrow().clone())
 }
 
-/// `cache key do render end` against the current store (uncached without one).
-pub fn fetch(key: impl FnOnce() -> String, render: impl FnOnce() -> String) -> String {
+/// Runs `f` on the key `write` puts in this thread's key buffer, which every key reuses: keys are
+/// built for every cached record on every request, hit or miss. A key built while another is in
+/// use (a fragment rendering the fragments nested in it) gets a buffer of its own.
+pub fn with_key<R>(write: impl FnOnce(&mut String), f: impl FnOnce(&str) -> R) -> R {
+    let mut key = KEY.take();
+    key.clear();
+    write(&mut key);
+    let result = f(&key);
+    KEY.set(key);
+    result
+}
+
+thread_local! {
+    static KEY: std::cell::Cell<String> = const { std::cell::Cell::new(String::new()) };
+}
+
+/// `cache key do render end` against the current store (uncached without one), for the key
+/// `key` writes.
+pub fn fetch(key: impl FnOnce(&mut String), render: impl FnOnce() -> String) -> Fragment {
     match current() {
-        Some(cache) => cache.fetch(&key(), render),
-        None => render(),
+        Some(cache) => with_key(key, |key| cache.fetch(key, render)),
+        None => Fragment::new(render()),
     }
 }
 
-/// The fragment `key` holds in the current store, if any, shared rather than copied. For callers
-/// that gather a fragment's inputs only on a miss, as `cache key do ... end` evaluates its block
-/// only then.
-pub fn read(key: &str) -> Option<Fragment> {
-    current()?.get(key)
+/// The fragment the key `key` writes holds in the current store, if any, shared rather than
+/// copied. For callers that gather a fragment's inputs only on a miss, as `cache key do ... end`
+/// evaluates its block only then.
+pub fn read(key: impl FnOnce(&mut String)) -> Option<Fragment> {
+    let cache = current()?;
+    with_key(key, |key| cache.get(key))
 }
 
-/// `json.cache! key do ... end` against the current store (uncached without one).
+/// `json.cache! key do ... end` against the current store (uncached without one), for the key
+/// `key` writes.
 pub fn try_fetch_value<T: CacheSize + Clone + Send + Sync + 'static, E>(
-    key: impl FnOnce() -> String,
+    key: impl FnOnce(&mut String),
     compute: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, E> {
     match current() {
-        Some(cache) => cache.try_fetch_value(&key(), compute),
+        Some(cache) => with_key(key, |key| cache.try_fetch_value(key, compute)),
         None => compute(),
     }
 }
@@ -311,12 +330,82 @@ pub fn digest(sources: &[&str]) -> String {
 
 /// `Time#to_fs(:usec)` of a record's `updated_at`: its `cache_version`.
 pub fn cache_version(updated_at: jiff::Timestamp) -> String {
-    format!("{}{:06}", updated_at.strftime("%Y%m%d%H%M%S"), updated_at.subsec_microsecond())
+    let mut version = String::with_capacity(20);
+    push_cache_version(&mut version, updated_at);
+    version
 }
 
 /// `record.cache_key_with_version`: `"messages/1-20240601120000000000"`.
 pub fn cache_key_with_version(table: &str, id: i64, updated_at: jiff::Timestamp) -> String {
-    format!("{table}/{id}-{}", cache_version(updated_at))
+    let mut key = String::with_capacity(table.len() + 41);
+    push_cache_key_with_version(&mut key, table, id, updated_at);
+    key
+}
+
+/// Appends `record.cache_key_with_version` to `key`.
+pub fn push_cache_key_with_version(key: &mut String, table: &str, id: i64, updated_at: jiff::Timestamp) {
+    key.push_str(table);
+    key.push('/');
+    push_integer(key, id);
+    key.push('-');
+    push_cache_version(key, updated_at);
+}
+
+/// Appends a record fragment's key, `views/<template>:<digest>/<record cache_key_with_version>`,
+/// to `key` (`CacheHelper#fragment_name_with_digest`).
+pub fn push_record_fragment_key(key: &mut String, template: &str, digest: &str, table: &str, id: i64, updated_at: jiff::Timestamp) {
+    key.push_str("views/");
+    key.push_str(template);
+    key.push(':');
+    key.push_str(digest);
+    key.push('/');
+    push_cache_key_with_version(key, table, id, updated_at);
+}
+
+/// Appends [`cache_version`] to `version`: `%Y%m%d%H%M%S` and six digits of microseconds, in UTC.
+/// Written digit by digit, as `strftime` and `format!` cost more than the rest of a cache hit.
+fn push_cache_version(version: &mut String, updated_at: jiff::Timestamp) {
+    if updated_at < jiff::Timestamp::UNIX_EPOCH {
+        // Before 1970 `{:06}` prints the negative sub-second part with its sign; no record is that
+        // old, so this just keeps those bytes the same.
+        let (time, microseconds) = (updated_at.strftime("%Y%m%d%H%M%S"), updated_at.subsec_microsecond());
+        std::fmt::Write::write_fmt(version, format_args!("{time}{microseconds:06}")).expect("a String takes any write");
+        return;
+    }
+    // `Timestamp::MAX` is in 9999, so the year has four digits.
+    let time = jiff::tz::Offset::UTC.to_datetime(updated_at);
+    let fields = [
+        (i64::from(time.year()), 4),
+        (i64::from(time.month()), 2),
+        (i64::from(time.day()), 2),
+        (i64::from(time.hour()), 2),
+        (i64::from(time.minute()), 2),
+        (i64::from(time.second()), 2),
+        (i64::from(updated_at.subsec_microsecond()), 6),
+    ];
+    for (value, width) in fields {
+        push_padded(version, value.unsigned_abs(), width);
+    }
+}
+
+/// Appends `value` in decimal, as `{value}` would.
+fn push_integer(out: &mut String, value: i64) {
+    if value < 0 {
+        out.push('-');
+    }
+    let magnitude = value.unsigned_abs();
+    push_padded(out, magnitude, magnitude.checked_ilog10().map_or(1, |log| log as usize + 1));
+}
+
+/// Appends the last `width` decimal digits of `value`, zero-padded.
+fn push_padded(out: &mut String, mut value: u64, width: usize) {
+    let mut digits = [b'0'; 20];
+    let digits = &mut digits[..width];
+    for digit in digits.iter_mut().rev() {
+        *digit = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    out.push_str(std::str::from_utf8(digits).expect("ASCII digits"));
 }
 
 #[cfg(test)]
@@ -336,12 +425,73 @@ mod tests {
         1 + payload + PER_ENTRY_OVERHEAD
     }
 
+    /// The keys built with `format!` and `strftime`, which the digit-by-digit ones must match byte
+    /// for byte.
+    mod formatted {
+        pub fn cache_version(updated_at: jiff::Timestamp) -> String {
+            format!("{}{:06}", updated_at.strftime("%Y%m%d%H%M%S"), updated_at.subsec_microsecond())
+        }
+
+        pub fn cache_key_with_version(table: &str, id: i64, updated_at: jiff::Timestamp) -> String {
+            format!("{table}/{id}-{}", cache_version(updated_at))
+        }
+    }
+
+    /// Timestamps with the calendar's edges and every sub-second precision.
+    fn timestamps() -> Vec<jiff::Timestamp> {
+        let mut times: Vec<jiff::Timestamp> = [
+            "1970-01-01T00:00:00Z",
+            "1970-01-01T00:00:00.000001Z",
+            "1999-12-31T23:59:59.999999999Z",
+            "2000-02-29T12:34:56.5Z",
+            "2024-02-29T23:59:59.000999Z",
+            "2024-06-01T12:00:00.000123Z",
+            "2024-06-01T12:00:00.000123456Z",
+            "2024-12-31T23:59:59.1Z",
+            "2038-01-19T03:14:08Z",
+            "2100-03-01T00:00:00.00001Z",
+            "9999-12-30T21:59:59.999999999Z",
+            "1969-12-31T23:59:59.5Z",
+            "1900-01-01T00:00:00Z",
+            "0001-01-01T00:00:00.25Z",
+            "-000001-06-15T01:02:03Z",
+        ]
+        .iter()
+        .map(|time| time.parse().unwrap())
+        .collect();
+        times.extend([jiff::Timestamp::MIN, jiff::Timestamp::MAX]);
+        // An instant written with an offset still formats in UTC.
+        times.push("2024-11-03T01:30:00.123456-07:00".parse().unwrap());
+        times
+    }
+
+    #[test]
+    fn keys_match_their_formatted_versions_byte_for_byte() {
+        let ids = [0, 1, 7, 10, 99, 100, 12_345, 1_000_000_000, i64::MAX, -1, i64::MIN];
+        for (i, time) in timestamps().into_iter().enumerate() {
+            assert_eq!(cache_version(time), formatted::cache_version(time), "{time}");
+            let id = ids[i % ids.len()];
+            assert_eq!(cache_key_with_version("messages", id, time), formatted::cache_key_with_version("messages", id, time));
+            let mut key = String::from("existing/");
+            push_record_fragment_key(&mut key, "messages/_message", "0123456789abcdef", "messages", id, time);
+            assert_eq!(
+                key,
+                format!("existing/views/messages/_message:0123456789abcdef/{}", formatted::cache_key_with_version("messages", id, time))
+            );
+        }
+    }
+
+    /// A key writer for the key `name`.
+    fn named(name: &str) -> impl FnOnce(&mut String) + '_ {
+        move |key| key.push_str(name)
+    }
+
     #[test]
     fn the_first_rendering_is_reused() {
         let cache = FragmentCache::new(BIG);
-        assert_eq!(cache.fetch("a", || "first".into()), "first");
-        assert_eq!(cache.fetch("a", || "second".into()), "first");
-        assert_eq!(cache.fetch("b", || "other".into()), "other");
+        assert_eq!(*cache.fetch("a", || "first".into()), "first");
+        assert_eq!(*cache.fetch("a", || "second".into()), "first");
+        assert_eq!(*cache.fetch("b", || "other".into()), "other");
     }
 
     #[test]
@@ -406,7 +556,7 @@ mod tests {
     #[test]
     fn a_value_larger_than_the_store_is_returned_but_not_kept() {
         let cache = FragmentCache::new(entry(10));
-        assert_eq!(cache.fetch("a", || "x".repeat(100)), "x".repeat(100));
+        assert_eq!(*cache.fetch("a", || "x".repeat(100)), "x".repeat(100));
         assert_eq!(cache.len(), 0);
         assert_eq!(cache.bytes(), 0);
     }
@@ -418,7 +568,7 @@ mod tests {
             cache.fetch(key, || "x".repeat(100));
         }
         let big = "y".repeat(3 * entry(100));
-        assert_eq!(cache.fetch("big", || big.clone()), big);
+        assert_eq!(*cache.fetch("big", || big.clone()), big);
         assert_eq!(cache.len(), 3, "the big value isn't kept");
         assert_eq!(cache.get::<Fragment>("big"), None);
         for key in ["a", "b", "c"] {
@@ -437,7 +587,7 @@ mod tests {
                 scope.spawn(move || {
                     for i in 0..5000 {
                         let hot = cache.fetch(&format!("{}", i % 8), || "x".repeat(200));
-                        assert_eq!(hot, "x".repeat(200));
+                        assert_eq!(*hot, "x".repeat(200));
                         cache.fetch(&format!("cold/{t}/{i}"), || "y".repeat(200));
                         assert!(cache.bytes() <= max);
                     }
@@ -481,20 +631,23 @@ mod tests {
     #[test]
     fn nested_fragments_use_the_same_store() {
         let cache = FragmentCache::new(BIG);
-        let outer = with(&cache, || fetch(|| "outer".into(), || format!("[{}]", fetch(|| "inner".into(), || "x".into()))));
-        assert_eq!(outer, "[x]");
+        let outer = with(&cache, || fetch(named("outer"), || format!("[{}]", fetch(named("inner"), || "x".into()))));
+        assert_eq!(*outer, "[x]");
         assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get::<Fragment>("outer").as_deref().map(String::as_str), Some("[x]"), "the inner key has its own buffer");
+        assert_eq!(cache.get::<Fragment>("inner").as_deref().map(String::as_str), Some("x"));
         assert!(current().is_none(), "the store is only current inside `with`");
-        assert_eq!(fetch(|| "outer".into(), || "uncached".into()), "uncached");
+        assert_eq!(*fetch(named("outer"), || "uncached".into()), "uncached");
     }
 
     #[test]
     fn fragments_can_be_looked_up_before_rendering() {
         let cache = FragmentCache::new(BIG);
-        assert_eq!(with(&cache, || read("a")), None);
-        with(&cache, || fetch(|| "a".into(), || "rendered".into()));
-        assert_eq!(with(&cache, || read("a")).as_deref().map(String::as_str), Some("rendered"));
-        assert_eq!(read("a"), None, "no store, no fragments");
+        assert_eq!(with(&cache, || read(named("a"))), None);
+        with(&cache, || fetch(named("ab"), || "rendered".into()));
+        assert_eq!(with(&cache, || read(named("ab"))).as_deref().map(String::as_str), Some("rendered"));
+        assert_eq!(with(&cache, || read(named("a"))), None, "each key starts from an empty buffer");
+        assert_eq!(read(named("ab")), None, "no store, no fragments");
     }
 
     #[test]

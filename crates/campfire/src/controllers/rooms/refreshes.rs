@@ -21,7 +21,7 @@ pub async fn show(c: &mut Ctx) -> Result {
     let request_host = Some(c.request.host());
     let refresh = c
         .app()
-        .read(move |conn| {
+        .read_offloaded(move |conn| {
             let new_messages = Message::page_created_since(conn, room.id, last_updated_at)?;
             let new_ids: Vec<i64> = new_messages.iter().map(|message| message.id).collect();
             let updated_messages = Message::page_updated_since(conn, room.id, last_updated_at, &new_ids)?;

@@ -3,10 +3,10 @@
 
 use super::assets::image_tag;
 use super::forms::button_to;
-use super::html::{Html, Safe};
+use super::html::Html;
 use super::links::link_to;
-use super::tag::{Attrs, attrs, builder_tag, content_tag, content_tag_text};
-use super::turbo::turbo_frame_tag;
+use super::tag::{AttrValue, Attrs, AttrsView, attrs, builder_tag, content_tag, content_tag_text};
+use super::turbo::turbo_frame_options;
 use super::url::rooms_directs_with_users;
 use crate::ViewContext;
 
@@ -97,19 +97,24 @@ pub fn profile_form_submit_button(ctx: &ViewContext) -> Html {
 
 /// `sidebar_turbo_frame_tag(src:) { content }`.
 pub fn sidebar_turbo_frame_tag(src: Option<&str>, content: &str) -> Html {
-    let data = attrs()
-        .data("turbo_permanent", true)
-        .data("controller", "rooms-list read-rooms turbo-frame")
-        .data("rooms_list_unread_class", "unread")
+    content_tag("turbo-frame", sidebar_turbo_frame_options(src), content)
+}
+
+/// `sidebar_turbo_frame_tag`'s attributes: `data: { turbo_permanent: true, controller: ...,
+/// rooms_list_unread_class: ..., action: ... }` for `turbo_frame_tag`.
+pub fn sidebar_turbo_frame_options(src: Option<&str>) -> AttrsView<'_> {
+    let data = AttrsView::with_capacity(7)
+        .attr("data-turbo-permanent", true)
+        .attr("data-controller", "rooms-list read-rooms turbo-frame")
+        .attr("data-rooms-list-unread-class", "unread")
         // html_safe in the reference so "->" isn't escaped
-        .data(
-            "action",
-            Safe(
-                "presence:present@window->rooms-list#read read-rooms:read->rooms-list#read turbo:frame-load->rooms-list#loaded refresh-room:visible@window->turbo-frame#reload"
-                    .to_string(),
+        .attr(
+            "data-action",
+            AttrValue::Safe(
+                "presence:present@window->rooms-list#read read-rooms:read->rooms-list#read turbo:frame-load->rooms-list#loaded refresh-room:visible@window->turbo-frame#reload",
             ),
         );
-    turbo_frame_tag("user_sidebar", src, Some("_top"), data, content)
+    turbo_frame_options("user_sidebar", src, Some("_top"), data)
 }
 
 /// `user_filter_menu_tag { content }`.

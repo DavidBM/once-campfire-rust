@@ -7,6 +7,7 @@ use std::path::Path;
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
+use futures_util::StreamExt;
 use tower::ServiceExt;
 
 use crate::app::{Booted, boot};
@@ -105,6 +106,8 @@ pub struct Reply {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Vec<u8>,
+    /// How many data frames the body came in.
+    pub frames: usize,
 }
 
 impl Reply {
@@ -233,9 +236,11 @@ impl Browser<'_> {
         let response = self.app.booted.router.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let headers = response.headers().clone();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec();
+        let chunks: Vec<_> = response.into_body().into_data_stream().collect().await;
+        let frames = chunks.len();
+        let body = chunks.into_iter().flat_map(|chunk| chunk.unwrap()).collect();
         self.absorb_set_cookies(&headers);
-        Reply { status, headers, body }
+        Reply { status, headers, body, frames }
     }
 
     pub async fn get(&mut self, path: &str) -> Reply {

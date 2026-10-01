@@ -1,13 +1,12 @@
 //! turbo-rails helpers: `turbo_frame_tag`, `turbo_stream_from`, `turbo_page_requires_reload`.
 
 use super::html::Html;
-use super::tag::{Attrs, attrs, builder_tag, content_tag};
+use super::tag::{AttrsView, attrs, builder_tag};
 
-/// `turbo_frame_tag(id, src:, target:, **attributes) { content }`: the attributes first, then
-/// `id`, `src` and `target` (nil ones dropped).
-pub fn turbo_frame_tag(id: &str, src: Option<&str>, target: Option<&str>, attributes: Attrs, content: &str) -> Html {
-    let options = attributes.id(id).attr_opt("src", src).attr_opt("target", target);
-    content_tag("turbo-frame", &options, content)
+/// `turbo_frame_tag(id, src:, target:, **attributes) { content }`'s attributes: the given ones
+/// first, then `id`, `src` and `target` (nil ones dropped).
+pub fn turbo_frame_options<'a>(id: &'a str, src: Option<&'a str>, target: Option<&'a str>, attributes: AttrsView<'a>) -> AttrsView<'a> {
+    attributes.attr("id", id).attr_opt("src", src).attr_opt("target", target)
 }
 
 /// `turbo_stream_from(*streamables)`. The signed stream name comes from the caller

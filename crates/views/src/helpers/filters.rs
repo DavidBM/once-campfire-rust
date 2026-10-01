@@ -9,7 +9,8 @@ use askama::Values;
 
 use super::forms::{self, FormWith};
 use super::html::Html;
-use super::tag::{self, Attrs};
+use super::tag::{self, AttrValue, Attrs};
+use super::turbo::turbo_frame_options;
 
 type Result = askama::Result<Html>;
 
@@ -20,36 +21,38 @@ pub fn form_with(content: impl Display, _: &dyn Values, form: impl std::borrow::
 
 /// `link_to(url, options) do ... end`.
 pub fn link_to(content: impl Display, _: &dyn Values, url: impl Display, options: impl std::borrow::Borrow<Attrs>) -> Result {
-    Ok(super::links::link_to(&url.to_string(), options.borrow().clone(), &content.to_string()))
+    let url = url.to_string();
+    tag::content_tag_block("a", super::links::link_options(&url, options.borrow().view()), content)
 }
 
 /// `button_to(url, options) do ... end`; `options` may include `method`.
 pub fn button_to(content: impl Display, _: &dyn Values, url: impl Display, options: impl std::borrow::Borrow<Attrs>) -> Result {
-    Ok(forms::button_to(&url.to_string(), options.borrow().clone(), &content.to_string()))
+    forms::button_to_block(&url.to_string(), options.borrow(), content)
 }
 
 /// `form.button(options) do ... end`.
 pub fn button(content: impl Display, _: &dyn Values, options: impl std::borrow::Borrow<Attrs>) -> Result {
-    Ok(forms::button_tag(options.borrow().clone(), &content.to_string()))
+    tag::content_tag_block("button", forms::button_options(options.borrow()), content)
 }
 
 /// `tag.name(options) do ... end` / `content_tag(name, options) do ... end`.
 pub fn content_tag(content: impl Display, _: &dyn Values, name: impl Display, options: impl std::borrow::Borrow<Attrs>) -> Result {
-    Ok(tag::content_tag(&name.to_string(), options.borrow(), &content.to_string()))
+    tag::content_tag_block(&name.to_string(), options.borrow(), content)
 }
 
 /// `turbo_frame_tag(id, src:, target:, **attributes) do ... end`; `src` and `target` may be in
 /// `options` and are moved after the id as turbo-rails does.
 pub fn turbo_frame_tag(content: impl Display, _: &dyn Values, id: impl Display, options: impl std::borrow::Borrow<Attrs>) -> Result {
-    let mut options = options.borrow().clone();
-    let src = options.remove("src").map(|value| attr_string(&value));
-    let target = options.remove("target").map(|value| attr_string(&value));
-    Ok(super::turbo::turbo_frame_tag(&id.to_string(), src.as_deref(), target.as_deref(), options, &content.to_string()))
+    let id = id.to_string();
+    let mut options = options.borrow().view();
+    let src = options.remove("src").map(AttrValue::as_str);
+    let target = options.remove("target").map(AttrValue::as_str);
+    tag::content_tag_block("turbo-frame", turbo_frame_options(&id, src, target, options), content)
 }
 
 /// `sidebar_turbo_frame_tag do ... end` (the block form never passes `src:`).
 pub fn sidebar_turbo_frame_tag(content: impl Display, _: &dyn Values) -> Result {
-    Ok(super::users::sidebar_turbo_frame_tag(None, &content.to_string()))
+    tag::content_tag_block("turbo-frame", super::users::sidebar_turbo_frame_options(None), content)
 }
 
 /// `link_to_room(room, **attributes) do ... end`.
@@ -59,7 +62,7 @@ pub fn link_to_room(
     room_id: impl std::borrow::Borrow<i64>,
     options: impl std::borrow::Borrow<Attrs>,
 ) -> Result {
-    Ok(super::rooms::link_to_room(*room_id.borrow(), options.borrow().clone(), &content.to_string()))
+    super::rooms::link_to_room(*room_id.borrow(), options.borrow(), content)
 }
 
 /// `link_to_zoom_qr_code(url) do ... end`.
@@ -86,11 +89,4 @@ pub fn web_share_session_button(
 /// `user_filter_menu_tag do ... end`.
 pub fn user_filter_menu_tag(content: impl Display, _: &dyn Values) -> Result {
     Ok(super::users::user_filter_menu_tag(&content.to_string()))
-}
-
-fn attr_string(value: &tag::Value) -> String {
-    match value {
-        tag::Value::Text(text) | tag::Value::Safe(text) => text.clone(),
-        tag::Value::Bool(flag) => flag.to_string(),
-    }
 }

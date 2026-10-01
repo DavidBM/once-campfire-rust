@@ -13,10 +13,14 @@
 //! ```
 
 use std::cell::Cell;
+use std::fmt::{Display, Write as _};
 use std::rc::Rc;
 
 use super::html::{Html, Safe, escape};
-use super::tag::{Attrs, Value, attrs, content_tag, legacy_tag, value_to_string};
+use super::tag::{
+    AttrValue, Attrs, AttrsView, BLOCK_LEN_GUESS, Value, attrs, close_tag, content_tag, legacy_tag, open_content_tag, open_tag, tag_buffer,
+    value_to_string,
+};
 
 /// The hidden `_method` field (`method_tag`).
 pub fn method_tag(method: &str) -> Html {
@@ -98,34 +102,36 @@ impl FormWith {
     /// `extra_tags_for_form`). No `authenticity_token`: forgery protection is by `Sec-Fetch-Site`.
     /// (See `campfire_kit::Ctx::verify_authenticity_token`.)
     pub fn open(&self) -> Html {
-        let mut html = attrs().attr_opt("id", self.id.as_deref()).attr_opt("class", self.class.as_deref());
-        html = html.merge(self.data.clone());
+        let mut out = String::new();
+        self.open_into(&mut out);
+        Safe(out)
+    }
+
+    fn open_into(&self, out: &mut String) {
+        let mut html = AttrsView::with_capacity(self.data.len() + 6)
+            .attr_opt("id", self.id.as_deref())
+            .attr_opt("class", self.class.as_deref())
+            .merge(&self.data);
         if self.multipart.get() {
             html = html.attr("enctype", "multipart/form-data");
         }
-        html = html.attr("action", self.action.as_str()).attr("accept-charset", "UTF-8");
-
         let method = self.method.to_lowercase();
-        let extra = match method.as_str() {
-            "get" => {
-                html = html.method("get");
-                String::new()
-            }
-            "post" | "" => {
-                html = html.method("post");
-                String::new()
-            }
-            other => {
-                html = html.method("post");
-                method_tag(other).0
-            }
-        };
-        Safe(format!("<form{}>{extra}", html.render()))
+        let form_method = if method == "get" { "get" } else { "post" };
+        let html = html.attr("action", self.action.as_str()).attr("accept-charset", "UTF-8").attr("method", form_method);
+        open_tag(out, "form", &html);
+        out.push('>');
+        if !matches!(method.as_str(), "get" | "post" | "") {
+            out.push_str(&method_tag(&method).0);
+        }
     }
 
     /// The whole form around already-rendered `content` (a block-less `form_with` passes "").
     pub fn wrap(&self, content: &str) -> Html {
-        Safe(format!("{}{content}</form>", self.open().0))
+        let mut out = String::with_capacity(content.len() + 256);
+        self.open_into(&mut out);
+        out.push_str(content);
+        out.push_str("</form>");
+        Safe(out)
     }
 
     pub fn text_field(&self, method: &str, value: Option<&str>, options: Attrs) -> Html {
@@ -254,11 +260,14 @@ fn sanitize_object_name(name: &str) -> String {
     sanitized.strip_suffix('_').map(str::to_string).unwrap_or(sanitized)
 }
 
-/// `form.button(options) { ... }` / `button_tag`: `{ name: "button", type: "submit" }` merged
-/// with the options.
+/// `form.button(options) { ... }` / `button_tag`.
 pub fn button_tag(options: Attrs, content: &str) -> Html {
-    let merged = attrs().name("button").type_("submit").merge(options);
-    content_tag("button", &merged, content)
+    content_tag("button", button_options(&options), content)
+}
+
+/// `button_tag`'s attributes: `{ name: "button", type: "submit" }` merged with the options.
+pub fn button_options(options: &Attrs) -> AttrsView<'_> {
+    AttrsView::with_capacity(options.len() + 2).attr("name", "button").attr("type", "submit").merge(options)
 }
 
 /// `hidden_field_tag(name, value, options)`.
@@ -274,18 +283,44 @@ fn sanitize_to_id(name: &str) -> String {
 
 /// `button_to(url, options) { content }`. `options` may carry `method` ("delete", "put",
 /// "patch", "post" or "get"), `form_class`, and the button's own attributes.
-pub fn button_to(url: &str, mut options: Attrs, content: &str) -> Html {
-    let method = options.remove("method").map(|value| value_to_string(&value)).unwrap_or_else(|| "post".into());
-    let form_class = options.remove("form_class").map(|value| value_to_string(&value)).unwrap_or_else(|| "button_to".into());
+pub fn button_to(url: &str, options: Attrs, content: &str) -> Html {
+    let mut out = tag_buffer("button", &options, content.len() + BUTTON_TO_FORM_LEN);
+    open_button_to(&mut out, url, &options);
+    out.push_str(content);
+    close_button_to(&mut out);
+    Safe(out)
+}
 
-    let method_field = if matches!(method.as_str(), "delete" | "patch" | "put") { method_tag(&method).0 } else { String::new() };
+/// `button_to(url, options) do ... end`: the filter block renders straight into the button.
+pub fn button_to_block(url: &str, options: &Attrs, content: impl Display) -> askama::Result<Html> {
+    let mut out = tag_buffer("button", options, BLOCK_LEN_GUESS + BUTTON_TO_FORM_LEN);
+    open_button_to(&mut out, url, options);
+    write!(out, "{content}")?;
+    close_button_to(&mut out);
+    Ok(Safe(out))
+}
+
+/// About how long `button_to`'s form tag and `_method` field are.
+const BUTTON_TO_FORM_LEN: usize = 128;
+
+/// The form, its `_method` field and the opening button tag.
+fn open_button_to(out: &mut String, url: &str, options: &Attrs) {
+    let mut options = options.view();
+    let method = options.remove("method").map_or("post", AttrValue::as_str);
+    let form_class = options.remove("form_class").map_or("button_to", AttrValue::as_str);
     let form_method = if method == "get" { "get" } else { "post" };
+    let form = AttrsView::with_capacity(3).attr("class", form_class).attr("method", form_method).attr("action", url);
+    open_tag(out, "form", &form);
+    out.push('>');
+    if matches!(method, "delete" | "patch" | "put") {
+        out.push_str(&method_tag(method).0);
+    }
+    open_content_tag(out, "button", &options.attr("type", "submit"));
+}
 
-    options.set("type", Some("submit".into()));
-    let button = content_tag("button", &options, content).0;
-
-    let form = attrs().class(form_class).method(form_method).attr("action", url);
-    Safe(format!("<form{}>{method_field}{button}</form>", form.render()))
+fn close_button_to(out: &mut String) {
+    close_tag(out, "button");
+    out.push_str("</form>");
 }
 
 #[cfg(test)]

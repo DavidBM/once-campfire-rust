@@ -37,10 +37,20 @@ pub struct Attr {
 
 impl Attr {
     /// The attribute's name as Nokogiri reports and serializes it ("xlink:href", "href").
-    pub fn qualified_name(&self) -> String {
+    pub fn qualified_name(&self) -> Cow<'_, str> {
         match &self.name.prefix {
-            Some(prefix) => format!("{}:{}", prefix, self.name.local),
-            None => self.name.local.to_string(),
+            Some(prefix) => Cow::Owned(format!("{}:{}", prefix, self.name.local)),
+            None => Cow::Borrowed(&self.name.local),
+        }
+    }
+
+    /// Whether `qualified_name() == name`, without building the qualified name.
+    pub fn has_name(&self, name: &str) -> bool {
+        match &self.name.prefix {
+            Some(prefix) => {
+                name.strip_prefix(&**prefix).and_then(|rest| rest.strip_prefix(':')).is_some_and(|local| local == &*self.name.local)
+            }
+            None => name == &*self.name.local,
         }
     }
 }
@@ -170,7 +180,7 @@ impl Dom {
     }
 
     pub fn attr(&self, id: NodeId, name: &str) -> Option<&str> {
-        self.element(id)?.attrs.iter().find(|a| a.qualified_name() == name).map(|a| a.value.as_str())
+        self.element(id)?.attrs.iter().find(|a| a.has_name(name)).map(|a| a.value.as_str())
     }
 
     pub fn has_attr(&self, id: NodeId, name: &str) -> bool {
@@ -180,7 +190,7 @@ impl Dom {
     /// Nokogiri's `node[name] = value`: updates in place, or appends a new attribute.
     pub fn set_attr(&mut self, id: NodeId, name: &str, value: &str) {
         if let Some(element) = self.element_mut(id) {
-            if let Some(attr) = element.attrs.iter_mut().find(|a| a.qualified_name() == name) {
+            if let Some(attr) = element.attrs.iter_mut().find(|a| a.has_name(name)) {
                 attr.value = value.to_string();
             } else {
                 element.attrs.push(Attr { name: QualName::new(None, ns!(), LocalName::from(name)), value: value.to_string() });
@@ -190,12 +200,12 @@ impl Dom {
 
     pub fn remove_attr(&mut self, id: NodeId, name: &str) -> Option<String> {
         let element = self.element_mut(id)?;
-        let index = element.attrs.iter().position(|a| a.qualified_name() == name)?;
+        let index = element.attrs.iter().position(|a| a.has_name(name))?;
         Some(element.attrs.remove(index).value)
     }
 
     pub fn attrs(&self, id: NodeId) -> Vec<(String, String)> {
-        self.element(id).map(|e| e.attrs.iter().map(|a| (a.qualified_name(), a.value.clone())).collect()).unwrap_or_default()
+        self.element(id).map(|e| e.attrs.iter().map(|a| (a.qualified_name().into_owned(), a.value.clone())).collect()).unwrap_or_default()
     }
 
     /// Element children only (Nokogiri's `Node#elements`).
@@ -393,12 +403,11 @@ impl Dom {
     fn serialize_node(&self, id: NodeId, escaping: AttributeEscaping, out: &mut String) {
         match &self.nodes[id].data {
             NodeData::Element(e) => {
-                let tag = serialized_tag_name(&e.name);
                 out.push('<');
-                out.push_str(&tag);
+                push_tag_name(&e.name, out);
                 for attr in &e.attrs {
                     out.push(' ');
-                    out.push_str(&attr.qualified_name());
+                    push_qualified_name(&attr.name, out);
                     out.push_str("=\"");
                     escape_attribute(&attr.value, escaping, out);
                     out.push('"');
@@ -409,7 +418,7 @@ impl Dom {
                 }
                 self.serialize_children(id, escaping, out);
                 out.push_str("</");
-                out.push_str(&tag);
+                push_tag_name(&e.name, out);
                 out.push('>');
             }
             NodeData::Text(text) => {
@@ -437,15 +446,20 @@ impl Dom {
     }
 }
 
-fn serialized_tag_name(name: &QualName) -> String {
+fn push_tag_name(name: &QualName, out: &mut String) {
     if name.ns == ns!(html) || name.ns == ns!(svg) || name.ns == ns!(mathml) {
-        name.local.to_string()
+        out.push_str(&name.local);
     } else {
-        match &name.prefix {
-            Some(p) => format!("{}:{}", p, name.local),
-            None => name.local.to_string(),
-        }
+        push_qualified_name(name, out);
     }
+}
+
+fn push_qualified_name(name: &QualName, out: &mut String) {
+    if let Some(prefix) = &name.prefix {
+        out.push_str(prefix);
+        out.push(':');
+    }
+    out.push_str(&name.local);
 }
 
 pub fn is_void_element(local: &str) -> bool {

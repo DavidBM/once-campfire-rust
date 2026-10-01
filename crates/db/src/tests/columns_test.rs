@@ -9,6 +9,7 @@ use rails_compat::clock::SystemClock;
 use rusqlite::{Row, params};
 
 use crate::fixtures;
+use crate::models::{Account, Boost, RichTextRecord, Role, Session, Status, User};
 use crate::{Connection, Involvement, Membership, Message, Room, RoomType, Timestamp, query_all, schema};
 
 /// Where a database's tables got their column order.
@@ -28,6 +29,12 @@ const MIGRATED_COLUMNS: &[(&str, &[&str])] = &[
     ("messages", &["id", "room_id", "creator_id", "created_at", "updated_at", "client_message_id"]),
     ("rooms", &["id", "name", "created_at", "updated_at", "type", "creator_id"]),
     ("memberships", &["id", "room_id", "user_id", "created_at", "updated_at", "unread_at", "involvement", "connections", "connected_at"]),
+    // `bio`, `bot_token` and `status` were added after the initial schema, and `active` removed.
+    ("users", &["id", "name", "created_at", "updated_at", "role", "email_address", "password_digest", "bio", "bot_token", "status"]),
+    ("sessions", &["id", "user_id", "token", "ip_address", "user_agent", "last_active_at", "created_at", "updated_at"]),
+    ("accounts", &["id", "name", "join_code", "created_at", "updated_at", "custom_styles", "settings", "singleton_guard"]),
+    ("boosts", &["id", "message_id", "booster_id", "content", "created_at", "updated_at"]),
+    ("action_text_rich_texts", &["id", "name", "body", "record_type", "record_id", "created_at", "updated_at"]),
 ];
 
 fn database(layout: Layout) -> Connection {
@@ -348,6 +355,106 @@ fn memberships_read_by_position_as_by_name() {
                 "{layout:?}"
             );
         }
+    }
+}
+
+// Users, sessions, accounts, boosts and rich texts
+
+#[test]
+fn users_sessions_accounts_boosts_and_rich_texts_read_each_column_into_its_own_field() {
+    for layout in LAYOUTS {
+        let conn = database(layout);
+        let user = User {
+            id: 4001,
+            name: "User 4002".into(),
+            email_address: Some("4003@example.com".into()),
+            password_digest: Some("digest 4004".into()),
+            role: Role::Bot,
+            status: Status::Banned,
+            bio: Some("bio 4005".into()),
+            bot_token: Some("token 4006".into()),
+            created_at: at(4007),
+            updated_at: at(4008),
+        };
+        conn.execute(
+            r#"INSERT INTO "users" ("id", "name", "email_address", "password_digest", "role", "status", "bio", "bot_token", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            params![user.id, user.name, user.email_address, user.password_digest, user.role, user.status, user.bio, user.bot_token, user.created_at, user.updated_at],
+        )
+        .unwrap();
+        let session = Session {
+            id: 5001,
+            user_id: user.id,
+            token: "token 5003".into(),
+            ip_address: Some("10.0.50.4".into()),
+            user_agent: Some("agent 5005".into()),
+            last_active_at: at(5006),
+            created_at: at(5007),
+            updated_at: at(5008),
+        };
+        conn.execute(
+            r#"INSERT INTO "sessions" ("id", "user_id", "token", "ip_address", "user_agent", "last_active_at", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+            params![session.id, session.user_id, session.token, session.ip_address, session.user_agent, session.last_active_at, session.created_at, session.updated_at],
+        )
+        .unwrap();
+        let account = Account {
+            id: 6001,
+            name: "Account 6002".into(),
+            join_code: "code-6003".into(),
+            custom_styles: Some("/* 6004 */".into()),
+            settings_json: Some(r#"{"n":6005}"#.into()),
+            singleton_guard: 6006,
+            created_at: at(6007),
+            updated_at: at(6008),
+        };
+        conn.execute(
+            r#"INSERT INTO "accounts" ("id", "name", "join_code", "custom_styles", "settings", "singleton_guard", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+            params![account.id, account.name, account.join_code, account.custom_styles, account.settings_json, account.singleton_guard, account.created_at, account.updated_at],
+        )
+        .unwrap();
+        let room = Room { creator_id: user.id, ..distinct_room() };
+        insert_room(&conn, &room);
+        let message = Message {
+            id: 7002,
+            room_id: room.id,
+            creator_id: user.id,
+            client_message_id: "7002".into(),
+            created_at: at(0),
+            updated_at: at(0),
+        };
+        insert_message(&conn, &message);
+        let boost = Boost {
+            id: 7001,
+            message_id: message.id,
+            booster_id: user.id,
+            content: "👍 7004".into(),
+            created_at: at(7005),
+            updated_at: at(7006),
+        };
+        conn.execute(
+            r#"INSERT INTO "boosts" ("id", "message_id", "booster_id", "content", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?)"#,
+            params![boost.id, boost.message_id, boost.booster_id, boost.content, boost.created_at, boost.updated_at],
+        )
+        .unwrap();
+        let rich_text = RichTextRecord {
+            id: 8001,
+            name: "body".into(),
+            body: Some("<p>8003</p>".into()),
+            record_type: "Message".into(),
+            record_id: 8005,
+            created_at: at(8006),
+            updated_at: at(8007),
+        };
+        conn.execute(
+            r#"INSERT INTO "action_text_rich_texts" ("id", "name", "body", "record_type", "record_id", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            params![rich_text.id, rich_text.name, rich_text.body, rich_text.record_type, rich_text.record_id, rich_text.created_at, rich_text.updated_at],
+        )
+        .unwrap();
+
+        assert_eq!(User::find(&conn, user.id).unwrap(), user, "{layout:?}");
+        assert_eq!(Session::find_by_token(&conn, &session.token).unwrap(), Some(session), "{layout:?}");
+        assert_eq!(Account::first(&conn).unwrap(), Some(account), "{layout:?}");
+        assert_eq!(Boost::for_message_ordered(&conn, boost.message_id).unwrap(), [boost], "{layout:?}");
+        assert_eq!(RichTextRecord::find_for(&conn, "Message", rich_text.record_id, "body").unwrap(), Some(rich_text), "{layout:?}");
     }
 }
 

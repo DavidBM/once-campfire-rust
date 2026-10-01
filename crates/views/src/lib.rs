@@ -11,9 +11,11 @@ pub mod helpers;
 pub mod layouts;
 pub mod messages;
 pub mod pwa;
+pub mod recorded;
 pub mod rooms;
 pub mod searches;
 pub mod sessions;
+pub mod sized;
 pub mod users;
 pub mod welcome;
 
@@ -52,12 +54,6 @@ pub struct ViewContext<'a> {
 }
 
 impl ViewContext<'_> {
-    /// What the application layout interpolates from the context that can be large: the asset
-    /// tags and the custom styles.
-    pub fn layout_len(&self) -> usize {
-        self.importmap_tags.len() + self.stylesheet_tags.len() + self.custom_styles.as_deref().map_or(0, str::len)
-    }
-
     pub fn asset(&self, logical_path: &str) -> String {
         (self.asset_path)(logical_path)
     }

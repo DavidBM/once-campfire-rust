@@ -225,12 +225,13 @@ the same on every request, so the app stopped compressing them per request, in t
    them. Each part is compressed once, against the part before it, and kept under the part's
    identity (the cached fragment, or the SHA-256 of the text) and its predecessor's; a message keeps
    pieces for the few predecessors it's seen with (its room, a page of older messages, search
-   results). The ETag comes from the parts' digests instead of a SHA-256 over the whole body.
+   results). The ETag and the gzip CRC come from the parts' digests and CRCs, and the template
+   records where each cached message goes, so the page is never joined into one buffer.
 
 For a 466 KB room page, gzip and the ETag took ~1,200 µs per request at first, ~460 µs after
-splicing, and 42 µs now; the first request after a page changes pays ~2 ms, once, to compress its
-new parts. The decoded body is unchanged, and the compressed page is within 1% of compressing it
-whole.
+splicing, 42 µs with a CRC over the whole body, and ~25 µs now; the first request after a page
+changes pays ~2 ms, once, to compress its new parts. The decoded body is unchanged, and the
+compressed page is within 1% of compressing it whole.
 
 | Route (16 clients) | Before | Spliced gzip | Cached page parts |
 |---|---|---|---|
@@ -363,13 +364,15 @@ Deliberate:
   return-to URL); `session_token` is re-signed when the session's hourly activity refresh runs, which
   keeps its 20-year expiry rolling; `last_room` is set when it changes. An authenticated request whose
   session doesn't need that refresh also no longer passes through the database writer.
-- **ETags aren't a digest of the body** on pages of 1 KB or more: they're a SHA-256 over the page's
-  parts (its cached messages and the text around them, or the whole body as one part). Identical
-  pages still get identical ETags, and any change gets a new one.
+- **ETags aren't a digest of the body** on pages made of cached messages (room, messages and search
+  pages): they're a SHA-256 over the page's parts (its cached messages and the text around them).
+  Identical pages still get identical ETags, and any change gets a new one.
 - **One more index.** On boot the app adds `index_messages_on_room_id_and_created_at` to the Rails
   schema if it's missing (a one-time 49 ms for 236k messages). Rails' schema pages a room's messages
   through `index_messages_on_room_id` alone, which sorts the room's whole history for every page.
   The index is additive, so the database still works with the Rails image.
+- **The database isn't memory-mapped.** Rails sets SQLite's `mmap_size` to 128 MB; without it,
+  posting a message takes about 15% less CPU. Reads go through SQLite's page cache instead.
 - **Leaner libvips and ffmpeg.** The image builds both from the same Debian sources as the Rails
   image, leaving out what Campfire can't reach (see [Running it](#running-it)). Thumbnails, video
   posters and metadata come out byte for byte the same for every image and video format either

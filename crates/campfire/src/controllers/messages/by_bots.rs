@@ -120,9 +120,10 @@ pub(crate) fn is_blank(value: &str) -> bool {
 async fn set_pagination_headers(c: &mut Ctx, room: &Room, messages: &[Message]) -> Result<()> {
     let after = c.params.get("after").is_some_and(Param::is_present);
     let (room_id, first, last) = (room.id, messages.first().cloned(), messages.last().cloned());
+    // Offloaded: the count reads every message in the room.
     let (count, next_page) = c
         .app()
-        .read(move |conn| {
+        .read_offloaded(move |conn| {
             let count = Message::count_in_room(conn, room_id)?;
             let next_page = match (first, last) {
                 (Some(_), Some(last)) if after => Message::exists_after(conn, room_id, &last)?.then_some(("after", last.id)),

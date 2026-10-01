@@ -53,13 +53,13 @@ pub const ADDITIONS: &[&str] = &[
 /// `timeout: 5000` in `config/database.yml`.
 pub const BUSY_TIMEOUT_MS: u64 = 5000;
 
-/// Applies the per-connection settings Rails applies (`SQLite3Adapter#configure_connection`).
+/// Applies the per-connection settings Rails applies (`SQLite3Adapter#configure_connection`),
+/// except `mmap_size`: every reader remaps a memory-mapped database after each commit.
 pub fn configure_connection(conn: &Connection) -> Result<()> {
     conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
     conn.pragma_update(None, "foreign_keys", true)?;
     conn.pragma_update(None, "journal_mode", "wal")?;
     conn.pragma_update(None, "synchronous", "normal")?;
-    conn.pragma_update(None, "mmap_size", 134_217_728)?;
     conn.pragma_update(None, "journal_size_limit", 67_108_864)?;
     conn.pragma_update(None, "cache_size", 2000)?;
     Ok(())

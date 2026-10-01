@@ -2,10 +2,13 @@
 //! ETags, conditional GET, HEAD) and hands them to hyper.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::http::header::{self, HeaderName, HeaderValue};
 use axum::http::{HeaderMap, StatusCode};
+
+use crate::deflater::splice::PageParts;
 
 pub const HTML_UTF8: &str = "text/html; charset=utf-8";
 pub const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -16,19 +19,34 @@ pub struct Response {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Body,
-    /// Cached fragments in the body, in order: the ETag and gzip reuse their digests and
-    /// compressed pieces instead of working through the whole body.
-    pub cached_fragments: Vec<std::sync::Arc<String>>,
-    /// The body split at `cached_fragments`, once the kit has finished the response.
-    pub(crate) page_parts: Option<std::sync::Arc<crate::deflater::splice::PageParts>>,
+    /// The body's SHA-256, when `Rack::ETag` digested it.
+    pub(crate) body_digest: Option<crate::deflater::BodyDigest>,
 }
 
 pub enum Body {
     Empty,
     Bytes(Bytes),
+    /// A page with cached fragments, in parts: the ETag and gzip reuse the fragments' digests and
+    /// compressed pieces instead of working through the whole body, which is never joined.
+    Parts(Arc<PageParts>),
     File(FileBody),
     /// A streaming body (e.g. a proxied blob); never ETagged.
     Stream(axum::body::Body),
+}
+
+impl Body {
+    /// The body `text` makes with each of `fragments` (cached HTML, in order) spliced in at its
+    /// byte offset in `text`, as a template recorded them while it rendered.
+    ///
+    /// # Panics
+    ///
+    /// If an offset is past the end of `text` or before the previous one.
+    pub fn spliced(text: impl Into<Bytes>, fragments: Vec<(usize, Arc<String>)>) -> Self {
+        match PageParts::splice(&text.into(), fragments) {
+            Ok(parts) => Body::Parts(Arc::new(parts)),
+            Err(whole) => Body::Bytes(whole),
+        }
+    }
 }
 
 impl std::fmt::Debug for Body {
@@ -36,6 +54,7 @@ impl std::fmt::Debug for Body {
         match self {
             Body::Empty => f.write_str("Empty"),
             Body::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            Body::Parts(parts) => write!(f, "Parts({} bytes)", parts.body_len()),
             Body::File(file) => write!(f, "File({:?})", file),
             Body::Stream(_) => f.write_str("Stream"),
         }
@@ -52,17 +71,11 @@ pub struct FileBody {
 
 impl Response {
     pub fn new(status: StatusCode) -> Self {
-        Self { status, headers: HeaderMap::new(), body: Body::Empty, cached_fragments: Vec::new(), page_parts: None }
+        Self { status, headers: HeaderMap::new(), body: Body::Empty, body_digest: None }
     }
 
     pub fn with_body(status: StatusCode, content_type: &str, body: impl Into<Bytes>) -> Self {
         Self::new(status).content_type(content_type).body(body)
-    }
-
-    /// Marks `fragments` (cached HTML, in body order) as appearing in the body as they are.
-    pub fn with_cached_fragments(mut self, fragments: Vec<std::sync::Arc<String>>) -> Self {
-        self.cached_fragments = fragments;
-        self
     }
 
     pub fn body(mut self, body: impl Into<Bytes>) -> Self {

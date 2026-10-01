@@ -368,7 +368,7 @@ fn users_sidebars_show() {
     let name = "sidebar_frame";
     let html = with_context(name, Request::default(), |ctx| {
         let page = sidebar(name, ctx);
-        layouts::frame(ctx, page.as_head(), page.as_content()).unwrap()
+        layouts::frame(ctx, page.as_head(), page.as_content()).unwrap().to_string()
     });
     assert_parity(name, "html", html);
 }

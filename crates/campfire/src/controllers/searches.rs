@@ -16,11 +16,12 @@ pub async fn index(c: &mut Ctx) -> Result {
     let user_id = require_current_user(c)?.id;
     let query = searchable_query(q.as_deref());
     let last_room = concerns::last_room_cookie(c);
-    // `set_messages`, the recent searches and `last_room_visited` in one trip to a reader.
+    // `set_messages`, the recent searches and `last_room_visited` in one trip to a reader, off the
+    // runtime's workers since the search's cost grows with the whole database.
     let searched = query.clone();
     let (messages, recent_searches, return_to_room_id) = c
         .app()
-        .read(move |conn| {
+        .read_offloaded(move |conn| {
             let messages = match &searched {
                 Some(query) => Message::search_reachable(conn, user_id, query)?,
                 None => Vec::new(),
@@ -32,9 +33,7 @@ pub async fn index(c: &mut Ctx) -> Result {
         .await?;
     let messages = present(c, move |presenter| presenter.messages(&messages)).await?;
     let index = IndexView { query, q, messages, recent_searches, return_to_room_id };
-    let response = page::framed_page!(c, StatusCode::OK, |ctx| Index { ctx, index: &index }).await?;
-    let fragments = campfire_views::messages::MessageItem::cached_fragments(&c.app().fragment_cache, &index.messages);
-    Ok(response.with_cached_fragments(fragments))
+    page::framed_page!(c, StatusCode::OK, |ctx| Index { ctx, index: &index }).await
 }
 
 pub async fn create(c: &mut Ctx) -> Result {
@@ -93,7 +92,7 @@ fn searchable_query(q: Option<&str>) -> Option<String> {
 async fn set_messages(c: &Ctx, q: Option<&str>) -> Result<Vec<Message>> {
     let Some(query) = searchable_query(q) else { return Ok(Vec::new()) };
     let user_id = require_current_user(c)?.id;
-    c.app().read(move |conn| Message::search_reachable(conn, user_id, &query)).await
+    c.app().read_offloaded(move |conn| Message::search_reachable(conn, user_id, &query)).await
 }
 
 #[cfg(test)]

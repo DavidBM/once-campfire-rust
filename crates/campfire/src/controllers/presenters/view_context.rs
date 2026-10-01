@@ -14,7 +14,8 @@
 use std::sync::LazyLock;
 
 use campfire_db::{Account, User};
-use campfire_kit::{Ctx, Error, Response, Result, StatusCode, format};
+use campfire_kit::{Ctx, Error, Format, Response, Result, StatusCode, format};
+use campfire_views::recorded::RecordedPage;
 use campfire_views::{AccountSummary, CurrentUser, Platform, ViewContext};
 
 use crate::app::AppCtx;
@@ -71,7 +72,7 @@ impl Layout {
 
     /// Renders with a `ViewContext` for this request. The flash is read (and so swept at the end
     /// of the request) the way the layout's `flash[:notice]` / `flash[:alert]` read it.
-    pub fn render(&self, c: &mut Ctx, render: impl FnOnce(&ViewContext) -> askama::Result<String>) -> Result<String> {
+    pub fn render<T>(&self, c: &mut Ctx, render: impl FnOnce(&ViewContext) -> askama::Result<T>) -> Result<T> {
         let flash_notice = c.flash().notice().map(str::to_string);
         let flash_alert = c.flash().alert().map(str::to_string);
         let base_url = c.url_for("");
@@ -103,17 +104,24 @@ impl Layout {
 
     /// A page rendered in the application layout: `text/html`, plus the `Link` preload header
     /// `stylesheet_link_tag` adds (`config.action_view.preload_links_header`).
-    pub fn page(&self, c: &mut Ctx, status: StatusCode, html: String) -> Response {
+    pub fn page(&self, c: &mut Ctx, status: StatusCode, html: impl Into<RecordedPage>) -> Response {
         let links = &stylesheet_tags().preload_links;
         let existing = c.headers.get("link").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
         c.set_header("link", &campfire_assets::append_preload_links(&existing, links));
-        c.render(status, &format::HTML, html)
+        render_recorded(c, status, &format::HTML, html.into())
     }
 
     /// A page rendered in turbo-rails' frame layout (no stylesheets, so no `Link` header).
-    pub fn frame(&self, c: &mut Ctx, status: StatusCode, html: String) -> Response {
-        c.render(status, &format::HTML, html)
+    pub fn frame(&self, c: &mut Ctx, status: StatusCode, html: impl Into<RecordedPage>) -> Response {
+        render_recorded(c, status, &format::HTML, html.into())
     }
+}
+
+/// [`Ctx::render`] for a recorded page: its text with its cached fragments spliced in, which the
+/// kit keeps as parts rather than joining them.
+pub fn render_recorded(c: &mut Ctx, status: StatusCode, template: Format, page: RecordedPage) -> Response {
+    let (text, fragments) = page.into_parts();
+    c.render_spliced(status, template, text, fragments)
 }
 
 /// The layout's `stylesheet_link_tag :all, "data-turbo-track": "reload"`: the assets are fixed at
@@ -147,7 +155,11 @@ pub fn account_summary(account: Option<&Account>, has_logo: bool) -> AccountSumm
 
 /// Renders a page in the application layout without the implicit render's template lookup: an
 /// explicit `render template:` answers HTML whatever the request's format.
-pub async fn page_in_any_format(c: &mut Ctx, status: StatusCode, full: impl FnOnce(&ViewContext) -> askama::Result<String>) -> Result {
+pub async fn page_in_any_format<T: Into<RecordedPage>>(
+    c: &mut Ctx,
+    status: StatusCode,
+    full: impl FnOnce(&ViewContext) -> askama::Result<T>,
+) -> Result {
     let layout = Layout::load(c).await?;
     let html = layout.render(c, full)?;
     Ok(layout.page(c, status, html))
@@ -156,22 +168,22 @@ pub async fn page_in_any_format(c: &mut Ctx, status: StatusCode, full: impl FnOn
 /// Renders a page in the application layout, or, for templates that expose their `head`/`content`
 /// blocks, turbo-rails' frame layout for a Turbo-Frame request
 /// (`layout -> { "turbo_rails/frame" if turbo_frame_request? }`).
-pub async fn page_or_frame(
+pub async fn page_or_frame<P: Into<RecordedPage>, F: Into<RecordedPage>>(
     c: &mut Ctx,
     status: StatusCode,
-    full: impl FnOnce(&ViewContext) -> askama::Result<String>,
-    frame: impl FnOnce(&ViewContext) -> askama::Result<String>,
+    full: impl FnOnce(&ViewContext) -> askama::Result<P>,
+    frame: impl FnOnce(&ViewContext) -> askama::Result<F>,
 ) -> Result {
     find_template(c, &format::HTML)?;
     page_or_frame_in_any_format(c, status, full, frame).await
 }
 
 /// [`page_or_frame`] without the template lookup (see [`page_in_any_format`]).
-pub async fn page_or_frame_in_any_format(
+pub async fn page_or_frame_in_any_format<P: Into<RecordedPage>, F: Into<RecordedPage>>(
     c: &mut Ctx,
     status: StatusCode,
-    full: impl FnOnce(&ViewContext) -> askama::Result<String>,
-    frame: impl FnOnce(&ViewContext) -> askama::Result<String>,
+    full: impl FnOnce(&ViewContext) -> askama::Result<P>,
+    frame: impl FnOnce(&ViewContext) -> askama::Result<F>,
 ) -> Result {
     let layout = Layout::load(c).await?;
     if c.is_turbo_frame_request() {

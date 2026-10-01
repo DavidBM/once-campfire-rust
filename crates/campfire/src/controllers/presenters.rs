@@ -79,7 +79,7 @@ pub fn user_view(secrets: &Secrets, user: &User) -> UserView {
 
 /// `users/_user.json.jbuilder` (`json.cache! user`).
 fn cached_user_json(secrets: &Secrets, base_url: &str, user: &User) -> UserJson {
-    let key = || jbuilder_key("users/_user", &cache_key_with_version("users", user.id, user.updated_at.jiff()), base_url);
+    let key = |key: &mut String| jbuilder_key(key, "users/_user", ("users", user.id, user.updated_at.jiff()), base_url);
     fragment_cache::try_fetch_value(key, || Ok::<_, std::convert::Infallible>(user_json(secrets, base_url, user)))
         .unwrap_or_else(|never| match never {})
 }
@@ -88,8 +88,17 @@ fn cached_user_json(secrets: &Secrets, base_url: &str, user: &User) -> UserJson 
 /// is the Rust build's (templates can't change while the process runs). The JSON carries absolute
 /// URLs built from the request's `base_url`, which comes from its Host header, so the key does too:
 /// Rails' key doesn't, and one request with a forged Host fed its URLs to every bot.
-fn jbuilder_key(template: &str, record: &str, base_url: &str) -> String {
-    format!("jbuilder/views/{template}:{}/{record}/{base_url}", env!("CARGO_PKG_VERSION"))
+/// `record` is the table, id and `updated_at` of its `cache_key_with_version`.
+fn jbuilder_key(key: &mut String, template: &str, record: (&str, i64, jiff::Timestamp), base_url: &str) {
+    let (table, id, updated_at) = record;
+    key.push_str("jbuilder/views/");
+    key.push_str(template);
+    key.push(':');
+    key.push_str(env!("CARGO_PKG_VERSION"));
+    key.push('/');
+    fragment_cache::push_cache_key_with_version(key, table, id, updated_at);
+    key.push('/');
+    key.push_str(base_url);
 }
 
 /// `users/_user.json.jbuilder`.
@@ -352,8 +361,8 @@ impl<'a> Presenter<'a> {
 
     /// `messages/_message.json.jbuilder` (`json.cache! message`).
     pub fn message_json(&self, message: &Message, base_url: &str) -> Result<MessageJson> {
-        let key =
-            || jbuilder_key("messages/_message", &cache_key_with_version("messages", message.id, message.updated_at.jiff()), base_url);
+        let record = ("messages", message.id, message.updated_at.jiff());
+        let key = |key: &mut String| jbuilder_key(key, "messages/_message", record, base_url);
         fragment_cache::try_fetch_value(key, || self.render_message_json(message, base_url))
     }
 
@@ -370,7 +379,8 @@ impl<'a> Presenter<'a> {
 
     /// `messages/boosts/_boost.json.jbuilder` (`json.cache! boost`).
     pub fn boost_json(&self, boost: &Boost, message: &Message, base_url: &str) -> Result<BoostJson> {
-        let key = || jbuilder_key("messages/boosts/_boost", &cache_key_with_version("boosts", boost.id, boost.updated_at.jiff()), base_url);
+        let record = ("boosts", boost.id, boost.updated_at.jiff());
+        let key = |key: &mut String| jbuilder_key(key, "messages/boosts/_boost", record, base_url);
         fragment_cache::try_fetch_value(key, || self.render_boost_json(boost, message, base_url))
     }
 
@@ -473,5 +483,20 @@ mod tests {
         let time: jiff::Timestamp = "2024-06-01T12:00:00.000123Z".parse().unwrap();
         assert_eq!(cache_key_with_version("messages", 1, time), "messages/1-20240601120000000123");
         assert_eq!(to_fs_number(time), "20240601120000");
+    }
+
+    #[test]
+    fn jbuilder_keys_match_their_formatted_version() {
+        let time: jiff::Timestamp = "2024-06-01T12:00:00.000123456Z".parse().unwrap();
+        let mut key = String::new();
+        jbuilder_key(&mut key, "messages/_message", ("messages", 7, time), "https://example.com");
+        assert_eq!(
+            key,
+            format!(
+                "jbuilder/views/messages/_message:{}/{}/https://example.com",
+                env!("CARGO_PKG_VERSION"),
+                cache_key_with_version("messages", 7, time)
+            )
+        );
     }
 }

@@ -1,24 +1,29 @@
 //! The parts of `RoomsHelper` and `Rooms::InvolvementsHelper` the sidebar and the profile's
 //! memberships use; the rest of the rooms helpers are in `crate::rooms`.
 
+use std::fmt::Display;
+
 use super::assets::image_tag;
 use super::forms::button_to;
 use super::html::Html;
-use super::links::link_to;
-use super::tag::{Attrs, attrs, content_tag_text};
+use super::links::link_options;
+use super::tag::{AttrValue, Attrs, attrs, content_tag_block, content_tag_text};
 use super::turbo::dom_id;
 use super::url::{Param, with_query};
 use crate::ViewContext;
 
 /// `link_to_room(room, **attributes) { content }`. `options` is the attribute hash in Ruby
 /// order, `data-*` entries included where the `data:` key was.
-pub fn link_to_room(room_id: i64, options: Attrs, content: &str) -> Html {
-    let defaults = attrs()
-        .data("rooms_list_target", "room")
-        .data("room_id", room_id)
-        .data("badge_dot_target", "unread")
-        .data("sorted_list_target", "item");
-    link_to(&campfire_routes::room(room_id), options.with_default_data(defaults), content)
+pub fn link_to_room(room_id: i64, options: &Attrs, content: impl Display) -> askama::Result<Html> {
+    let id = room_id.to_string();
+    let defaults = [
+        ("data-rooms-list-target", AttrValue::Text("room")),
+        ("data-room-id", AttrValue::Text(&id)),
+        ("data-badge-dot-target", AttrValue::Text("unread")),
+        ("data-sorted-list-target", AttrValue::Text("item")),
+    ];
+    let url = campfire_routes::room(room_id);
+    content_tag_block("a", link_options(&url, options.view().with_default_data(&defaults)), content)
 }
 
 /// `HUMANIZE_INVOLVEMENT`.

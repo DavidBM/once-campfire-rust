@@ -96,10 +96,6 @@ impl Page for Show<'_> {
     fn body_class(&self) -> Option<&str> {
         Some("sidebar")
     }
-
-    fn extra_capacity(&self) -> usize {
-        crate::layouts::messages_page_capacity(self.ctx, &self.show.messages)
-    }
 }
 
 impl Show<'_> {
