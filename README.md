@@ -39,52 +39,16 @@ docker run -d -p 80:80 -p 443:443 \
 
 ## Performance
 
-Production images, identical seed data and four pinned hardware threads per app on an AMD Ryzen
-AI MAX+ 395. These are medians of three interleaved runs on October 1, 2026, using Rust at
-[`1ea6d6f`](https://github.com/basecamp/once-campfire-rust/commit/1ea6d6f6b24fd21e7d01e69b7c92df5c380bcbde).
-The [full report](bench/results/emoon-pr43-production-20261001/report.md) records settings and ranges.
+Measured with 16 concurrent clients on an AMD Ryzen AI MAX+ 395,
+with four hardware threads allocated to each app.
 
-### HTTP throughput (16 concurrent clients)
-
-| Route | Rails | Rust | Rust advantage |
-|---|---|---|---|
-| Room page | 217 req/s | 36,120 req/s | **166×** |
-| Messages page | 403 req/s | 41,352 req/s | **103×** |
-| Sidebar | 524 req/s | 34,339 req/s | **65×** |
-| Search | 376 req/s | 33,510 req/s | **89×** |
-| Post a message | 269 req/s | 6,817 req/s | **25×** |
-| `/up` | 4,068 req/s | 233,085 req/s | **57×** |
-
-### Latency and real time
-
-| Measurement | Rails | Rust | Rust advantage |
-|---|---|---|---|
-| Room page p99, 64 clients | 463 ms | 3.1 ms | **151×** |
-| Post a message p99, 64 clients | 381 ms | 13.9 ms | **27×** |
-| Upload a 505 KB JPEG until its thumbnail is served | 107 ms | 27.6 ms | **3.9×** |
-| Deliveries per second, 10,000 clients in one room | 9,167 | 671,674 | **73×** |
-| Post to all 10,000 clients received, p50 | 1,823 ms | 39.6 ms | **46×** |
-| Post to all 10,000 clients received, p99 | 2,644 ms | 61.1 ms | **43×** |
-| Connect and subscribe 10,000 clients | 29.5 s | 1.4 s | **21×** |
-
-Every client subscribed and received every broadcast. Rails' 10,000-client p50 delivery latency
-ranged from 1.4 to 3.1 seconds between runs; Rust's ranged from 38.8 to 41.0 ms.
-
-### Startup, memory and image size
-
-| Measurement | Rails | Rust | Rust advantage |
-|---|---|---|---|
-| Cold start until `/up` answers | 2,731 ms | 157 ms | **17×** |
-| Idle memory (container, including page cache) | 393 MB | 20 MB | **20×** |
-| App memory, 10,000 idle clients (Pss) | 1,485 MB | 250 MB | **5.9×** |
-| App memory, 10,000 clients under load (Pss) | 2,096 MB | 248 MB | **8.5×** |
-| Whole container, 10,000 clients under load (Pss) | 3,182 MB | 248 MB | **13×** |
-| Image size, unpacked | 933 MB | 168 MB | **5.5×** |
-| Image size, compressed download | 359 MB | 67 MB | **5.3×** |
-
-Idle container memory varies with page cache (Rust: 15–31 MB). Rails' container includes Redis
-and Thruster; Rust runs one process. Image sizes are recorded in
-[`sizes.json`](bench/results/emoon-pr43-production-20261001/sizes.json).
+| HTTP workload (requests/sec) | Rails | [Django](https://github.com/basecamp/once-campfire-django) | [Laravel](https://github.com/basecamp/once-campfire-laravel) | [Express](https://github.com/basecamp/once-campfire-express) | [Elixir](https://github.com/basecamp/once-campfire-elixir) | [Go](https://github.com/basecamp/once-campfire-go) | [Rust](https://github.com/basecamp/once-campfire-rust) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Room page | 241 | 170 | 164 | 559 | 722 | 3,860 | 36,260 |
+| Messages page | 413 | 196 | 175 | 777 | 1,053 | 5,573 | 40,872 |
+| Sidebar | 552 | 615 | 715 | 4,125 | 1,275 | 19,753 | 34,672 |
+| Search | 435 | 315 | 305 | 1,294 | 1,156 | 7,053 | 33,299 |
+| Post a message | 273 | 154 | 137 | 256 | 801 | 4,767 | 6,896 |
 
 Database scheduling, rich text rendering and cached-page gzip improvements contributed by
 Daniel Collin ([emoon](https://github.com/emoon)) in
