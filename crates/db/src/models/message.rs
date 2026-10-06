@@ -239,10 +239,7 @@ impl Message {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let sql = format!(
-            r#"{SELECT_REACHABLE} join message_search_index idx on messages.id = idx.rowid WHERE "memberships"."user_id" = ? AND (idx.body match ?) ORDER BY "messages"."created_at" DESC LIMIT 100"#
-        );
-        Ok(reversed(query_all(conn, &sql, params![user_id, query], Self::from_row)?))
+        Ok(reversed(query_all(conn, &search_reachable_sql(), params![user_id, query], Self::from_row)?))
     }
 
     // Creating, updating, destroying
@@ -470,6 +467,17 @@ pub fn sound_in(plain_text: &str) -> Option<&'static Sound> {
 fn remove_from_index(tx: &Tx<'_>, id: i64) -> Result<()> {
     tx.conn().execute_cached("delete from message_search_index where rowid = ?", [id])?;
     Ok(())
+}
+
+/// [`Message::search_reachable`]'s query: the user's id, then the `MATCH` terms. Ordered by the
+/// index's rowid, which is the message id, so SQLite walks the matches newest first and stops at
+/// the page; ordering by `created_at` collected and sorted every match first. Ids follow
+/// `created_at`: messages are only inserted by [`Message::create`], on the one writer thread,
+/// stamped inside their transaction.
+pub(crate) fn search_reachable_sql() -> String {
+    format!(
+        r#"{SELECT_REACHABLE} join message_search_index idx on messages.id = idx.rowid WHERE "memberships"."user_id" = ? AND (idx.body match ?) ORDER BY idx.rowid DESC LIMIT 100"#
+    )
 }
 
 fn reversed<T>(mut rows: Vec<T>) -> Vec<T> {

@@ -106,6 +106,33 @@ fn search_reachable_only_finds_messages_in_the_users_rooms() {
 }
 
 #[test]
+fn search_reachable_finds_the_newest_100_matches_oldest_first() {
+    let t = TestDb::new();
+    let ids: Vec<i64> = (0..105)
+        .map(|n| {
+            t.travel(1);
+            create(&t, "designers", "david", &format!("aardvark {n}"), &format!("aardvark {n}")).id
+        })
+        .collect();
+    let found = t.read(|c| Message::search_reachable(c, id("kevin"), "aardvark"));
+    assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), ids[5..]);
+}
+
+/// The newest matches come off the full-text index in order, rather than every match being
+/// collected and sorted before the page is cut.
+#[test]
+fn search_reachable_reads_matches_off_the_index_without_sorting_them() {
+    let t = TestDb::new();
+    let plan = t.read(|c| {
+        let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {}", crate::models::message::search_reachable_sql()))?;
+        let rows = stmt.query_map(rusqlite::params![id("kevin"), "\"aardvark\""], |r| r.get::<_, String>(3))?;
+        let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows.join("; "))
+    });
+    assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+}
+
+#[test]
 fn creating_a_blank_message_with_attachment_uses_filename_as_plain_text_body() {
     let t = TestDb::new();
     let message = t.write(|tx| {
