@@ -1,0 +1,48 @@
+== main, since 2026-10-06 18:00:00 (0 updated since)
+QUERY PLAN `--SEARCH messages USING INDEX index_messages_on_room_id_and_created_at (room_id=?) 
+rows, sum of ids: 0|
+real 0.216 real 0.222 real 0.214 real 0.206 real 0.207 
+== main, since 2026-10-04 00:00:00 (4 updated since)
+QUERY PLAN `--SEARCH messages USING INDEX index_messages_on_room_id_and_created_at (room_id=?) 
+rows, sum of ids: 3|3000012
+real 0.226 real 0.219 real 0.220 real 0.220 real 0.218 
+== main, since 2020-01-24 03:00:02 (1004 updated since)
+QUERY PLAN `--SEARCH messages USING INDEX index_messages_on_room_id_and_created_at (room_id=?) 
+rows, sum of ids: 40|79999639
+real 0.000 real 0.000 real 0.000 real 0.000 real 0.001 
+== main, since 2020-01-21 20:00:02 (100004 updated since)
+QUERY PLAN `--SEARCH messages USING INDEX index_messages_on_room_id_and_created_at (room_id=?) 
+rows, sum of ids: 40|79999639
+real 0.000 real 0.000 real 0.000 real 0.000 real 0.001 
+== main, since 1970-01-01 00:00:00 (1000001 updated since)
+QUERY PLAN `--SEARCH messages USING INDEX index_messages_on_room_id_and_created_at (room_id=?) 
+rows, sum of ids: 40|79999639
+real 0.000 real 0.000 real 0.000 real 0.000 real 0.000 
+real 0.015 real 0.173  <- without the index: 10,000 inserts, 10,000 touches
+real 0.014 real 0.171  <- without the index: 10,000 inserts, 10,000 touches
+real 0.014 real 0.173  <- without the index: 10,000 inserts, 10,000 touches
+real 0.898 <- creating the index
+== pr, since 2026-10-06 18:00:00 (0 updated since)
+QUERY PLAN |--SEARCH messages USING INDEX index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, sum of ids: 0|
+real 0.000 real 0.000 real 0.000 real 0.000 real 0.000 
+== pr, since 2026-10-04 00:00:00 (4 updated since)
+QUERY PLAN |--SEARCH messages USING INDEX index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, sum of ids: 3|3000012
+real 0.001 real 0.000 real 0.000 real 0.000 real 0.000 
+== pr, since 2020-01-24 03:00:02 (1004 updated since)
+QUERY PLAN |--SEARCH messages USING INDEX index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, sum of ids: 40|79999639
+real 0.001 real 0.001 real 0.000 real 0.000 real 0.001 
+== pr, since 2020-01-21 20:00:02 (100004 updated since)
+QUERY PLAN |--SEARCH messages USING INDEX index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, sum of ids: 40|79999639
+real 0.038 real 0.037 real 0.036 real 0.037 real 0.037 
+== pr, since 1970-01-01 00:00:00 (1000001 updated since)
+QUERY PLAN |--SEARCH messages USING INDEX index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, sum of ids: 40|79999639
+real 0.365 real 0.363 real 0.366 real 0.360 real 0.371 
+real 0.022 real 0.202  <- with the index: 10,000 inserts, 10,000 touches
+real 0.021 real 0.196  <- with the index: 10,000 inserts, 10,000 touches
+real 0.022 real 0.202  <- with the index: 10,000 inserts, 10,000 touches
+index size: 70.2 MB of 707.5 MB

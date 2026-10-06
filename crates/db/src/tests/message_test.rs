@@ -242,3 +242,31 @@ fn pagination() {
     let updated = t.read(|c| Message::page_updated_since(c, watercooler, since, &created_ids));
     assert!(updated.iter().all(|m| !created_ids.contains(&m.id)));
 }
+
+/// What a refresh replaces: the newest page of the messages updated since, in creation order
+/// whatever order they were updated in.
+#[test]
+fn page_updated_since_is_the_newest_page_of_updated_messages_in_creation_order() {
+    let t = TestDb::new();
+    let watercooler = id("watercooler");
+    let updated_since = |since: Timestamp| {
+        t.read(|c| Message::page_updated_since(c, watercooler, since, &[])).into_iter().map(|m| m.id).collect::<Vec<_>>()
+    };
+    let older = t.read(|c| Message::first_page(c, watercooler));
+    t.travel(60);
+    let since = t.now();
+    for mut message in [older[2].clone(), older[0].clone(), older[1].clone()] {
+        t.travel(1);
+        t.write(move |tx| message.touch(tx));
+    }
+    assert_eq!(updated_since(since), [older[0].id, older[1].id, older[2].id]);
+
+    // Three touched and 38 created: the page leaves out the oldest.
+    let created: Vec<i64> = (2..PAGE_SIZE)
+        .map(|n| {
+            t.travel(1);
+            create(&t, "watercooler", "david", &format!("message {n}"), &format!("c{n}")).id
+        })
+        .collect();
+    assert_eq!(updated_since(since), [&[older[1].id, older[2].id][..], &created].concat());
+}

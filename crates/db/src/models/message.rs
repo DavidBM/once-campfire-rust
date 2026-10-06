@@ -177,12 +177,7 @@ impl Message {
 
     /// `room.messages.without(excluding).page_updated_since(time)`
     pub fn page_updated_since(conn: &Connection, room_id: i64, time: Timestamp, excluding: &[i64]) -> Result<Vec<Self>> {
-        let without = if excluding.is_empty() {
-            String::new()
-        } else {
-            format!(r#" AND "messages"."id" NOT IN ({})"#, placeholders(excluding.len()))
-        };
-        let sql = format!(r#"{SELECT_IN_ROOM}{without} AND (updated_at > ?) ORDER BY "messages"."created_at" DESC LIMIT {PAGE_SIZE}"#);
+        let sql = page_updated_since_sql(excluding.len());
         let mut values: Vec<rusqlite::types::Value> = vec![room_id.into()];
         values.extend(excluding.iter().map(|id| rusqlite::types::Value::from(*id)));
         values.push(time.to_db().into());
@@ -470,6 +465,15 @@ pub fn sound_in(plain_text: &str) -> Option<&'static Sound> {
 fn remove_from_index(tx: &Tx<'_>, id: i64) -> Result<()> {
     tx.conn().execute_cached("delete from message_search_index where rowid = ?", [id])?;
     Ok(())
+}
+
+/// [`Message::page_updated_since`]'s query, leaving out `excluding` ids: the room's id, those ids,
+/// then the time. Sorting on `+created_at`, which no index covers, has SQLite find the messages
+/// updated since through `(room_id, updated_at)` and sort just those, instead of walking the whole
+/// room by `(room_id, created_at)` looking for them.
+pub(crate) fn page_updated_since_sql(excluding: usize) -> String {
+    let without = if excluding == 0 { String::new() } else { format!(r#" AND "messages"."id" NOT IN ({})"#, placeholders(excluding)) };
+    format!(r#"{SELECT_IN_ROOM}{without} AND (updated_at > ?) ORDER BY +"messages"."created_at" DESC LIMIT {PAGE_SIZE}"#)
 }
 
 fn reversed<T>(mut rows: Vec<T>) -> Vec<T> {
