@@ -1,0 +1,2 @@
+{"date":"2026-10-06T19:12:52Z","lane":"main","scenario":"search","rps":12.63,"requests":253,"p50":"1.23s","p99":"1.70s","non2xx":0,"errors":"","conn":16,"dur":20}
+{"date":"2026-10-06T19:13:21Z","lane":"pr","scenario":"search","rps":4389.73,"requests":87834,"p50":"3.39ms","p99":"7.64ms","non2xx":0,"errors":"","conn":16,"dur":20}

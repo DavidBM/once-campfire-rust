@@ -1,0 +1,34 @@
+== "coffee" matches 40000 messages
+-- user 1, ORDER BY "messages"."created_at" DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 0:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) |--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, first id, last id, sum of ids: 100|1995050|2000000|199752500
+real 0.062 real 0.060 real 0.060 real 0.061 real 0.059 
+-- user 1, ORDER BY idx.rowid DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 192:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) `--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) 
+rows, first id, last id, sum of ids: 100|1995050|2000000|199752500
+real 0.001 real 0.000 real 0.000 real 0.000 real 0.000 
+-- user 10008, ORDER BY "messages"."created_at" DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 0:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) |--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, first id, last id, sum of ids: 0|||
+real 0.048 real 0.047 real 0.046 real 0.047 real 0.047 
+-- user 10008, ORDER BY idx.rowid DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 192:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) `--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) 
+rows, first id, last id, sum of ids: 0|||
+real 0.051 real 0.049 real 0.049 real 0.050 real 0.050 
+== "message" matches 2001120 messages
+-- user 1, ORDER BY "messages"."created_at" DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 0:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) |--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, first id, last id, sum of ids: 100|1999901|2000000|199995050
+real 0.794 real 0.779 real 0.794 real 0.783 real 0.795 
+-- user 1, ORDER BY idx.rowid DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 192:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) `--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) 
+rows, first id, last id, sum of ids: 100|1999901|2000000|199995050
+real 0.001 real 0.000 real 0.001 real 0.000 real 0.000 
+-- user 10008, ORDER BY "messages"."created_at" DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 0:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) |--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) `--USE TEMP B-TREE FOR ORDER BY 
+rows, first id, last id, sum of ids: 0|||
+real 0.296 real 0.291 real 0.294 real 0.294 real 0.291 
+-- user 10008, ORDER BY idx.rowid DESC
+QUERY PLAN |--SCAN idx VIRTUAL TABLE INDEX 192:M0 |--SEARCH messages USING INTEGER PRIMARY KEY (rowid=?) |--SEARCH memberships USING COVERING INDEX index_memberships_on_room_id_and_user_id (room_id=? AND user_id=?) `--SEARCH rooms USING INTEGER PRIMARY KEY (rowid=?) 
+rows, first id, last id, sum of ids: 0|||
+real 0.508 real 0.510 real 0.505 real 0.509 real 0.506 
