@@ -77,19 +77,19 @@ Incremental refresh with 0/23/1,000 updated rows: ~151–155 ms → 0.07/0.07/0.
 
 | HTTP workload (requests/sec) | Rails | [Django](https://github.com/basecamp/once-campfire-django) | [Laravel](https://github.com/basecamp/once-campfire-laravel) | [Express](https://github.com/basecamp/once-campfire-express) | [Elixir](https://github.com/basecamp/once-campfire-elixir) | [Go](https://github.com/basecamp/once-campfire-go) | [Rust](https://github.com/basecamp/once-campfire-rust) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Room page | 236 | 62 | 764 | 2,702 | 981 | 32,045 | 35,056 |
-| Messages page | 384 | 70 | 922 | 3,183 | 1,341 | 31,670 | 40,481 |
-| Sidebar | 474 | 230 | 1,399 | 34,595 | 2,546 | 20,125 | 33,924 |
-| Search | 415 | 120 | 1,291 | 6,725 | 1,907 | 30,239 | 34,199 |
-| Post a message | 244 | 113 | 498 | 2,183 | 1,431 | 9,413 | 8,995 |
+| Room page | 236 | 62 | 764 | 2,702 | 981 | 32,132 | 35,056 |
+| Messages page | 384 | 70 | 922 | 3,183 | 1,341 | 31,564 | 40,481 |
+| Sidebar | 474 | 230 | 1,399 | 34,595 | 2,546 | 17,993 | 33,924 |
+| Search | 415 | 120 | 1,291 | 6,725 | 1,907 | 29,775 | 34,199 |
+| Post a message | 244 | 113 | 498 | 2,183 | 1,431 | 9,442 | 8,995 |
 
-Rates are medians of two runs. The Go column was remeasured after the contributor’s final storage-key validation commit. Express changed from one default HTTP worker to four on the assigned CPU set. Laravel changed from PHP-FPM to eight persistent Octane workers. Django uses its current one-worker default; its earlier published numbers used an explicitly configured multiworker setup. These differences are part of the configurations tested, so the table does not isolate language speed.
+Rates are medians of two runs. The Go column was remeasured after the contributor’s final storage-key validation and fresh sidebar layout commits. Express changed from one default HTTP worker to four on the assigned CPU set. Laravel changed from PHP-FPM to eight persistent Octane workers. Django uses its current one-worker default; its earlier published numbers used an explicitly configured multiworker setup. These differences are part of the configurations tested, so the table does not isolate language speed.
 
 | Implementation | Room page before → after | Search before → after | Post before → after |
 |---|---:|---:|---:|
 | Rails | 235 → 236 | 410 → 415 | 243 → 244 |
 | Elixir | 720 → 981 | 1,164 → 1,907 | 866 → 1,431 |
-| Go | 3,847 → 32,045 | 7,042 → 30,239 | 7,352 → 9,413 |
+| Go | 3,847 → 32,132 | 7,042 → 29,775 | 7,352 → 9,442 |
 | Rust | 35,835 → 35,056 | 33,535 → 34,199 | 9,241 → 8,995 |
 | Express | 239 → 2,702 | 490 → 6,725 | 852 → 2,183 |
 | Laravel | 168 → 764 | 323 → 1,291 | 202 → 498 |
@@ -102,12 +102,12 @@ The warm Rails fixture does not show an overall throughput improvement; its side
 | go-pr4 | 4,202 | 5,855 | 16,351 | 9,623 | 11,975 |
 | go-pr6 | 5,005 | 8,114 | 19,617 | 12,415 | 8,944 |
 | go-pr7 | 24,646 | 26,291 | 23,214 | 14,670 | 7,374 |
-| go | 32,045 | 31,670 | 20,125 | 30,239 | 9,413 |
+| go | 32,132 | 31,564 | 17,993 | 29,775 | 9,442 |
 
 ## Attribution and scope
 
 Contributor commits are retained in the merge history. Partial contributions are credited with Co-authored-by trailers: sernle’s full-sidebar correction, Nick Potts’s renderer incorporated by nijaru, Pasi Vuorio’s literal-regex cache, and Jack Ellis’s cache identity/token ideas. Laravel #1 was closed by its author during review; its useful fragment-cache work is retained and credited, rather than treating its entire superseded runtime proposal as a fresh open PR.
 
-The new public [C fork](https://github.com/basecamp/once-campfire-c) retains mrsaraiva’s history. Its current build has not yet been measured on this full fixture and is not included in the table. The prior C POST claim used an invalid membership seed and cannot be reused; a corrected importer and persistent-write validation are being carried into the fork.
+The new public [C fork](https://github.com/basecamp/once-campfire-c) retains mrsaraiva’s history. Its current build has not yet been measured on this full fixture and is not included in the table. The prior C POST claim used an invalid membership seed and cannot be reused; the corrected importer and persistent-write validation are published in the fork.
 
 The architecture transfer pass follows this PR review. The table represents these reviewed versions; further changes will be checked and remeasured before replacing it. WebSocket throughput is not inferred from HTTP rates, and old WebSocket figures have been removed from the current READMEs.
