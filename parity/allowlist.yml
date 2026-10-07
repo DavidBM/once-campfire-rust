@@ -5,3 +5,8 @@
   layers: [server]
   reason: The manifest is JSON-escaped, not HTML-escaped, so the small logo's URL reads `&v=` where Rails wrote `&amp;v=` (README, "The web app manifest is valid JSON")
   owner: views
+
+- state: pwa/manifest/custom_styles
+  layers: [server]
+  reason: The custom-styles seed has the same deliberate JSON-escaped logo URL as pwa/manifest (README, "The web app manifest is valid JSON")
+  owner: views

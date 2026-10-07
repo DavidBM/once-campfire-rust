@@ -46,23 +46,25 @@ run_in_image() {
   # ERR_NETWORK_CHANGED whenever an interface comes or goes in its namespace, which on the host
   # network is every docker run/rm. Its proxies reach the servers through capture/forward.ts,
   # which runs on the host network, over a Unix socket in NET_DIR.
-  local net_dir; net_dir=$(mktemp -d "$PARITY/out/.net.XXXXXX")
+  # Unix socket paths are limited to 107 bytes on Linux, even in a long checkout path.
+  local net_dir; net_dir=$(mktemp -d /tmp/campfire-parity-net.XXXXXX)
   NET_DIRS+=("$net_dir")
   local socket=$net_dir/upstream.sock
   case "$runtime" in
     docker)
       local image; image=$(docker_image)
+      local capture_user=${PARITY_CAPTURE_USER:-$(id -u):$(id -g)}
       # Named, so parity_cleanup can stop them if the run is interrupted.
       local name=parity-capture-$$-$RANDOM
       CAPTURE_CONTAINERS+=("$name" "$name-forward")
-      docker run -d --rm --init --name "$name-forward" --network host -u "$(id -u):$(id -g)" \
-        -v "$ROOT:$ROOT" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
+      docker run -d --rm --init --name "$name-forward" --network host -u "$capture_user" \
+        -v "$ROOT:$ROOT" -v "$net_dir:$net_dir" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
         "$image" node capture/forward.ts "$socket" >/dev/null
       wait_for_socket "$socket"
       docker run --rm --init --name "$name" --network none --ipc host \
-        -u "$(id -u):$(id -g)" -e HOME=/tmp -e TZ=UTC -e CI="${CI:-}" -e PARITY_WORKERS="${PARITY_WORKERS:-}" \
+        -u "$capture_user" -e HOME=/tmp -e TZ=UTC -e CI="${CI:-}" -e PARITY_WORKERS="${PARITY_WORKERS:-}" \
         -e PARITY_UPSTREAM_SOCKET="$socket" \
-        -v "$ROOT:$ROOT" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
+        -v "$ROOT:$ROOT" -v "$net_dir:$net_dir" --tmpfs "$PARITY/node_modules" -w "$PARITY" \
         "$image" node capture/cli.ts "$@" &
       local status=0
       wait $! || status=$? # in the background so an interrupt runs the caller's trap (parity_cleanup) at once
@@ -78,7 +80,7 @@ run_in_image() {
       # bubblewrap create the mount point for the repo at its host path.
       local top; top="/$(echo "$ROOT" | cut -d/ -f2)"
       local bw=(bwrap --ro-bind "$rootfs" / --tmpfs "$top" --bind "$ROOT" "$ROOT" --ro-bind "$modules" /node_modules
-        --tmpfs "$PARITY/node_modules" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /dev/shm
+        --tmpfs "$PARITY/node_modules" --dev /dev --proc /proc --tmpfs /tmp --bind "$net_dir" "$net_dir" --tmpfs /dev/shm
         --ro-bind /etc/resolv.conf /etc/resolv.conf --unshare-user --unshare-pid --unshare-ipc
         --die-with-parent --clearenv
         --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

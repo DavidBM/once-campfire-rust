@@ -21,6 +21,8 @@
 //! desktop Chrome: `--user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 //! (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'` (one line).
 
+mod validation;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -270,27 +272,45 @@ async fn http_load(a: &Args) -> Res<Value> {
     let accept_encoding = if gzip { "gzip" } else { "identity" };
     let limit: u64 = a.num("requests", u64::MAX);
     let trace_path = a.opt("trace");
+    let validation_path = a.opt("validate");
+    let audit_path = a.opt("audit-writes");
+    if audit_path.is_some() && (validation_path.is_none() || post_room.is_none()) {
+        return Err("--audit-writes requires POST and --validate".into());
+    }
+    let audit = Arc::new(Mutex::new(Vec::<(u64, String)>::new()));
     let trace = Arc::new(Mutex::new(Vec::<(u128, u64, u16)>::new()));
     let issued = Arc::new(AtomicU64::new(0));
 
     let hist_all = Arc::new(Mutex::new(hist()));
     let statuses = Arc::new(Mutex::new(HashMap::<u16, u64>::new()));
     let errors = Arc::new(AtomicU64::new(0));
+    let invalid_responses = Arc::new(AtomicU64::new(0));
+    let successful = Arc::new(AtomicU64::new(0));
+    let invalid_reasons = Arc::new(Mutex::new(HashMap::<String, u64>::new()));
     let bytes_total = Arc::new(AtomicU64::new(0));
     let start = Instant::now();
     let deadline = start + duration;
     let mut tasks = Vec::new();
     for _ in 0..conc {
         let (addr, cookie, path, post_room, csrf) = (addr.clone(), cookie.clone(), path.clone(), post_room.clone(), csrf.clone());
+        let invalid_responses = invalid_responses.clone();
+        let successful = successful.clone();
+        let invalid_reasons = invalid_reasons.clone();
         let (hist_all, statuses, errors, bytes_total, issued, trace) =
             (hist_all.clone(), statuses.clone(), errors.clone(), bytes_total.clone(), issued.clone(), trace.clone());
+        let mut validator =
+            validation_path.as_ref().map(|path| validation::Validator::from_file(std::path::Path::new(path))).transpose()?;
+        let audit = audit.clone();
+        let auditing = audit_path.is_some();
         let tracing = trace_path.is_some();
         tasks.push(tokio::spawn(async move {
             let mut h = hist();
             let mut local = HashMap::<u16, u64>::new();
             let mut conn: Option<SendRequest<Full<Bytes>>> = None;
-            let mut i = 0u64;
+            let mut successful_local = 0;
+            let mut invalid_reason = None;
             let mut local_trace = Vec::new();
+            let mut local_audit = Vec::new();
             while Instant::now() < deadline && issued.fetch_add(1, Ordering::Relaxed) < limit {
                 if conn.is_none() {
                     match connect(&addr).await {
@@ -302,10 +322,10 @@ async fn http_load(a: &Args) -> Res<Value> {
                         }
                     }
                 }
+                let posted = post_room.as_ref().map(|_| format!("bench write {}", nonce()));
                 let (method, p, headers, body) = match &post_room {
                     Some(room) => {
-                        i += 1;
-                        let (mut h, b) = message_request(&cookie, &csrf, &format!("bench write {i}"));
+                        let (mut h, b) = message_request(&cookie, &csrf, posted.as_deref().unwrap());
                         h.push(("accept-encoding", accept_encoding.into()));
                         ("POST", format!("/rooms/{room}/messages"), h, b)
                     }
@@ -321,6 +341,27 @@ async fn http_load(a: &Args) -> Res<Value> {
                 match send(conn.as_mut().unwrap(), &addr, method, &p, &headers, body).await {
                     Ok(r) => {
                         h.record(t0.elapsed().as_micros() as u64).ok();
+                        let valid = if let Some(v) = &mut validator {
+                            v.check(r.status, &r.headers, &r.body, posted.as_deref())
+                        } else if r.status == 200 && !r.body.is_empty() {
+                            Ok(())
+                        } else {
+                            Err("unsuccessful or empty response")
+                        };
+                        if valid.is_ok() {
+                            successful_local += 1;
+                        }
+                        if auditing
+                            && valid.is_ok()
+                            && let Some(id) = validator.as_ref().and_then(validation::Validator::message_id)
+                        {
+                            local_audit.push((id, posted.as_ref().unwrap().clone()));
+                        }
+                        if let Err(reason) = valid {
+                            invalid_responses.fetch_add(1, Ordering::Relaxed);
+                            invalid_reason.get_or_insert(reason);
+                            *invalid_reasons.lock().unwrap().entry(reason.to_owned()).or_default() += 1;
+                        }
                         if tracing {
                             local_trace.push((wall0, t0.elapsed().as_micros() as u64, r.status));
                         }
@@ -336,6 +377,11 @@ async fn http_load(a: &Args) -> Res<Value> {
                     }
                 }
             }
+            if let Some(reason) = invalid_reason {
+                eprintln!("invalid response: {reason}");
+            }
+            successful.fetch_add(successful_local, Ordering::Relaxed);
+            audit.lock().unwrap().extend(local_audit);
             hist_all.lock().unwrap().add(&h).unwrap();
             trace.lock().unwrap().extend(local_trace);
             let mut s = statuses.lock().unwrap();
@@ -355,18 +401,30 @@ async fn http_load(a: &Args) -> Res<Value> {
         let lines: String = t.iter().map(|(s, l, st)| format!("{s} {l} {st}\n")).collect();
         std::fs::write(path, lines)?;
     }
+    if let Some(path) = audit_path {
+        use std::io::Write;
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
+        for (id, token) in audit.lock().unwrap().iter() {
+            serde_json::to_writer(&mut file, &json!({"id":id,"token":token}))?;
+            file.write_all(b"\n")?;
+        }
+        file.flush()?;
+    }
     let h = hist_all.lock().unwrap();
     let st = statuses.lock().unwrap();
-    let ok: u64 = st.iter().filter(|(k, _)| **k < 400).map(|(_, v)| v).sum();
+    let ok = successful.load(Ordering::Relaxed);
     Ok(json!({
         "path": if let Some(r) = &post_room { format!("POST /rooms/{r}/messages") } else { path },
         "conc": conc,
         "gzip": gzip,
         "secs": (elapsed * 100.0).round() / 100.0,
-        "rps": ((h.len() as f64 / elapsed) * 10.0).round() / 10.0,
+        "rps": ((ok as f64 / elapsed) * 10.0).round() / 10.0,
         "ok": ok,
         "statuses": st.iter().map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
         "errors": errors.load(Ordering::Relaxed),
+        "invalid_responses": invalid_responses.load(Ordering::Relaxed),
+        "invalid_reasons": *invalid_reasons.lock().unwrap(),
+        "validation": if validation_path.is_some() { "route-contract-v1" } else { "status-only" },
         "avg_bytes": if !h.is_empty() { bytes_total.load(Ordering::Relaxed) / h.len() } else { 0 },
         "latency": summary(&h),
     }))
@@ -624,12 +682,27 @@ async fn post_marked(
     let t0 = Instant::now();
     delivery.sent.lock().unwrap().insert(seq, t0);
     match send(sender.as_mut()?, addr, "POST", &format!("/rooms/{room}/messages"), &h, b).await {
-        Ok(r) if r.status < 400 => Some(t0.elapsed().as_micros() as u64),
+        Ok(r) if valid_message_post(r.status, &r.body, &format!("fanout bmk{seq}z")) => Some(t0.elapsed().as_micros() as u64),
         _ => {
             *sender = None;
             None
         }
     }
+}
+
+fn valid_message_post(status: u16, body: &[u8], expected: &str) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else { return false };
+    static IDS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let ids = IDS.get_or_init(|| regex::Regex::new(r#"data-message-id="([0-9]+)""#).unwrap());
+    let mut messages = ids.captures_iter(text);
+    status == 200
+        && text.starts_with("<turbo-stream")
+        && text.trim_end().ends_with("</turbo-stream>")
+        && text.contains("<template>")
+        && text.contains("</template>")
+        && text.contains(expected)
+        && messages.next().is_some_and(|id| id[1].parse::<u64>().is_ok_and(|id| id > 0))
+        && messages.next().is_none()
 }
 
 async fn wait_drain(delivery: &Delivery, seqs: &[u64], clients: usize, timeout: Duration) {
@@ -764,6 +837,7 @@ async fn cable(a: &Args) -> Res<Value> {
     // Phase 1: paced messages, one at a time (open loop at `interval`), for delivery latency.
     let mut poster = None;
     let mut post_h = hist();
+    let mut post_errors = 0u64;
     let mut seqs = Vec::new();
     let mut seq = 0u64;
     for _ in 0..latency_msgs {
@@ -771,6 +845,8 @@ async fn cable(a: &Args) -> Res<Value> {
         let tick = Instant::now();
         if let Some(us) = post_marked(&mut poster, &addr, &room, &cookie, &csrf, seq, &delivery).await {
             post_h.record(us).ok();
+        } else {
+            post_errors += 1;
         }
         seqs.push(seq);
         let spent = tick.elapsed();
@@ -784,6 +860,9 @@ async fn cable(a: &Args) -> Res<Value> {
     let client_h = std::mem::replace(&mut *delivery.per_client.lock().unwrap(), hist());
     let latency = json!({
         "messages": latency_msgs,
+        "post_attempts": latency_msgs,
+        "post_successes": post_h.len(),
+        "post_errors": post_errors,
         "complete": complete,
         "post": summary(&post_h),
         "per_client": summary(&client_h),
@@ -805,22 +884,31 @@ async fn cable(a: &Args) -> Res<Value> {
             let mut conn = None;
             let mut mine = Vec::new();
             let mut h = hist();
+            let mut attempts = 0u64;
+            let mut errors = 0u64;
             while Instant::now() < tput_deadline {
                 let s = next.fetch_add(1, Ordering::Relaxed);
+                attempts += 1;
                 if let Some(us) = post_marked(&mut conn, &addr, &room, &cookie, &csrf, s, &delivery).await {
                     h.record(us).ok();
                     mine.push(s);
+                } else {
+                    errors += 1;
                 }
             }
-            (mine, h)
+            (mine, h, attempts, errors)
         }));
     }
     let mut tseqs = Vec::new();
     let mut tpost_h = hist();
+    let mut post_attempts = 0u64;
+    let mut post_errors = 0u64;
     for t in ptasks {
-        let (m, h) = t.await?;
+        let (m, h, attempts, errors) = t.await?;
         tseqs.extend(m);
         tpost_h.add(&h).ok();
+        post_attempts += attempts;
+        post_errors += errors;
     }
     let posting_secs = tput_start.elapsed().as_secs_f64();
     phase("saturated_posted");
@@ -833,12 +921,14 @@ async fn cable(a: &Args) -> Res<Value> {
     let wire_bytes = delivery.wire_bytes.load(Ordering::Relaxed) - wire_before;
     let throughput = json!({
         "posters": posters,
+        "post_attempts": post_attempts,
+        "post_errors": post_errors,
         "posted": tseqs.len(),
         "posts_per_sec": ((tseqs.len() as f64 / posting_secs) * 10.0).round() / 10.0,
         "complete": tcomplete,
         "delivered_msgs_per_sec": ((tcomplete as f64 / span) * 10.0).round() / 10.0,
         "frames_per_sec": (receipts as f64 / span).round(),
-        "wire_mb_per_sec": (wire_bytes as f64 / span / 1e6 * 10.0).round() / 10.0,
+        "wire_mb_per_sec": deflate.then(|| (wire_bytes as f64 / span / 1e6 * 10.0).round() / 10.0),
         "drain_secs": ((span - posting_secs) * 100.0).round() / 100.0,
         "post": summary(&tpost_h),
         "per_client": summary(&tclient_h),
@@ -1018,5 +1108,80 @@ async fn main() {
             eprintln!("loadgen {cmd}: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod validation_integration_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn intermittent_200_error_page_invalidates_a_loaded_run() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for i in 0..8 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).await.unwrap();
+                    request.push(byte[0]);
+                }
+                let body = if i == 3 {
+                    "<!DOCTYPE html><html>Internal server error</html>"
+                } else {
+                    "<!DOCTYPE html><html><div data-message-id=\"42\">coffee</div></html>"
+                };
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let path = std::env::temp_dir().join(format!("campfire-validation-{}.json", nonce()));
+        std::fs::write(&path, json!({"kind":"room_show","content_type":"text/html","required":[],"message_ids":[42]}).to_string()).unwrap();
+        let args = Args(HashMap::from([
+            ("base".into(), format!("http://{addr}")),
+            ("path".into(), "/rooms/1".into()),
+            ("validate".into(), path.to_str().unwrap().into()),
+            ("requests".into(), "8".into()),
+            ("conc".into(), "1".into()),
+            ("duration".into(), "5".into()),
+        ]));
+        let result = http_load(&args).await.unwrap();
+        server.await.unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(result["errors"], 0);
+        assert_eq!(result["statuses"]["200"], 8);
+        assert_eq!(result["ok"], 7);
+        assert_eq!(result["invalid_responses"], 1);
+        assert_eq!(result["invalid_reasons"]["incorrect message window"], 1);
+        assert_eq!(result["validation"], "route-contract-v1");
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::valid_message_post;
+
+    #[test]
+    fn message_post_requires_a_complete_response_with_its_actual_message() {
+        let valid = br#"<turbo-stream action="append" target="messages_room_1"><template><div data-message-id="42">fanout bmk1z</div></template></turbo-stream>"#;
+        assert!(valid_message_post(200, valid, "fanout bmk1z"));
+        for status in [201, 302, 500] {
+            assert!(!valid_message_post(status, valid, "fanout bmk1z"));
+        }
+        assert!(!valid_message_post(200, valid, "fanout bmk2z"));
+        assert!(!valid_message_post(200, &valid[..valid.len() - 1], "fanout bmk1z"));
+        assert!(!valid_message_post(200, b"<turbo-stream></turbo-stream>", "fanout bmk1z"));
+        assert!(!valid_message_post(200, b"an error page", "fanout bmk1z"));
+        assert!(!valid_message_post(200, &[0xff], "fanout bmk1z"));
     }
 }

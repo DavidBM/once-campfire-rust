@@ -13,7 +13,19 @@ import glob, json, os, statistics, sys
 out = sys.argv[1]
 runs = {}
 for f in sorted(glob.glob(os.path.join(out, "*-*.json"))):
+    if f.endswith("-write-audit.json"):
+        continue
     r = json.load(open(f))
+    for sample in r["http"]:
+        if (sample.get("validation") != "route-contract-v1" or sample.get("invalid_responses") != 0
+                or sample.get("errors") != 0 or sample.get("ok", 0) <= 0
+                or sample.get("statuses") != {"200": sample["ok"]}):
+            raise SystemExit(f"Refusing unvalidated or unsuccessful results: {f}")
+    if r["http"]:
+        audit = json.load(open(f.removesuffix(".json") + "-write-audit.json"))
+        posts = sum(sample["ok"] for sample in r["http"] if sample["route"] == "post_message")
+        if audit.get("verified") is not True or audit.get("acknowledged", -1) < posts:
+            raise SystemExit(f"Refusing results without exact persistent-write evidence: {f}")
     runs.setdefault(r["app"], []).append(r)
 identity = runs.pop("rust-identity", None)
 apps = [a for a in ("reference", "rust") if a in runs]
