@@ -170,6 +170,7 @@ pub fn lookup(c: &mut Ctx) -> Option<Response> {
 }
 
 pub fn prepare(c: &mut Ctx, response: &mut Response) {
+    let Some(ticket) = c.current::<Ticket>().cloned() else { return };
     if c.request.method != Method::GET || response.status != StatusCode::OK || !c.flash().is_empty() {
         return;
     }
@@ -178,11 +179,8 @@ pub fn prepare(c: &mut Ctx, response: &mut Response) {
         Body::Parts(parts) => parts.body_len(),
         _ => return,
     };
-    if size <= MAX_BODY
-        && cacheable_headers(&response.headers)
-        && let Some(ticket) = c.current::<Ticket>()
-    {
-        response.extensions.insert(ticket.clone());
+    if size <= MAX_BODY && cacheable_headers(&response.headers) {
+        response.extensions.insert(ticket);
     }
 }
 

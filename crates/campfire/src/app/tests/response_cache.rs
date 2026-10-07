@@ -269,6 +269,12 @@ async fn flash_is_rendered_and_consumed_fresh_instead_of_reusing_or_populating_a
         .split(';')
         .next()
         .unwrap();
+    let health = send(&test.booted.router, get_with_cookie("/up", &format!("{cookie}; {flash_cookie}"))).await;
+    assert_eq!(health.status, StatusCode::OK);
+    assert!(
+        health.headers.get_all(header::SET_COOKIE).iter().all(|value| !value.to_str().unwrap().starts_with("_campfire_session=")),
+        "an unrelated health response must not consume pending flash"
+    );
     let before = hits(&test);
     let flashed = send(&test.booted.router, get_with_cookie(&path, &format!("{cookie}; {flash_cookie}"))).await;
     assert_eq!(flashed.status, StatusCode::OK);
