@@ -14,13 +14,14 @@ use campfire_richtext::Content;
 use campfire_storage::{Blob, Staged, Variation};
 use campfire_views::messages as views;
 use ruby_compat::integer_cast;
+use sha2::{Digest, Sha256};
 
 use crate::active_storage::{self, keep_after_commit, storage_error};
 use crate::app::{App, AppCtx};
 use crate::concerns::{self, Before, before_actions, require_current_user};
 use crate::controllers::presenters::attachments::Assignment;
 use crate::controllers::presenters::page::{self, Rendered};
-use crate::controllers::presenters::{DbResolver, Presenter, cache_key_with_version, room_kind};
+use crate::controllers::presenters::{DbResolver, Presenter, room_kind};
 
 // --- Actions ------------------------------------------------------------------------------------
 
@@ -28,24 +29,30 @@ use crate::controllers::presenters::{DbResolver, Presenter, cache_key_with_versi
 pub async fn index(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
     let (_, room) = concerns::set_room(c).await?;
+    if let Some(response) = crate::response_cache::lookup(c) {
+        return Ok(response);
+    }
     let messages = find_paged_messages(c, &room).await?;
     if messages.is_empty() {
         return Ok(c.head(StatusCode::NO_CONTENT));
     }
-    // fresh_when @messages: the records' cache keys, their latest updated_at, and the template.
-    let etag = messages.iter().map(|m| cache_key_with_version("messages", m.id, m.updated_at.jiff())).collect::<Vec<_>>().join("/");
-    let freshness = Freshness {
-        etag: Some(etag),
-        last_modified: messages.iter().map(|m| m.updated_at.jiff()).max(),
-        template: Some(TEMPLATE_DIGEST_INDEX.into()),
-        ..Freshness::default()
-    };
-    if let Some(not_modified) = c.fresh_when(freshness) {
-        return Ok(not_modified);
-    }
     c.respond_to(&[&format::HTML])?;
+    let last_modified = messages.iter().map(|m| m.updated_at.jiff()).max();
     let views = present(c, move |presenter| presenter.messages(&messages)).await?;
-    page::bare(c, StatusCode::OK, &format::HTML, |ctx| campfire_views::render_sized!(views::Index { ctx, messages: &views })).await
+    let response =
+        page::bare(c, StatusCode::OK, &format::HTML, |ctx| campfire_views::render_sized!(views::Index { ctx, messages: &views })).await?;
+    // Presentation also depends on creators, boosts and rich text. Direct SQL may change them
+    // without touching messages.updated_at, so record versions alone cannot validate this body.
+    let etag = match &response.body {
+        campfire_kit::Body::Parts(parts) => parts.etag(),
+        campfire_kit::Body::Bytes(body) => hex::encode(Sha256::digest(body)),
+        _ => return Ok(response),
+    };
+    // An IMS-only validator is safe on a current cache hit; on a miss, the old record timestamp
+    // cannot prove that none of the presentation dependencies changed.
+    c.request.headers.remove(axum::http::header::IF_MODIFIED_SINCE);
+    let freshness = Freshness { etag: Some(etag), last_modified, template: Some(TEMPLATE_DIGEST_INDEX.into()), ..Freshness::default() };
+    Ok(c.fresh_when(freshness).unwrap_or(response))
 }
 
 /// Stands in for the digest `ETagWithTemplateDigest` adds for `messages/index` (only the ETag's
@@ -76,7 +83,7 @@ pub async fn create(c: &mut Ctx) -> Result {
         .app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
-            let item = campfire_views::fragment_cache::with(&app.fragment_cache, || presenter.message_item(&message))?;
+            let item = campfire_views::fragment_cache::with(&app.fragments(), || presenter.message_item(&message))?;
             let account = campfire_db::Account::first(conn)?;
             page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
                 views::CreateStream { ctx, message: &item, room_kind: kind }.render()
@@ -426,12 +433,13 @@ pub(crate) async fn present<T: Send + 'static>(
     f: impl FnOnce(&Presenter) -> campfire_db::Result<T> + Send + 'static,
 ) -> Result<T> {
     let app = c.app().clone();
+    let fragments = crate::response_cache::fragments(c);
     let request_host = Some(c.request.host());
     c.app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, request_host);
             // The Jbuilder partials (`json.cache!`) read the fragment cache on this thread.
-            campfire_views::fragment_cache::with(&app.fragment_cache, || f(&presenter))
+            campfire_views::fragment_cache::with(&fragments, || f(&presenter))
         })
         .await
 }

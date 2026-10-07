@@ -143,7 +143,7 @@ async fn a_text_message_is_answered_and_broadcast_as_it_was_stored() {
     assert!(message.contains(&format!(r#"data-message-updated-at="{}""#, epoch_ms(stored.updated_at.jiff()))));
     // Cached under the stored row's key (its `updated_at` to the microsecond), which is what the
     // room page, reading the message from the database, looks up.
-    let cached = campfire_views::fragment_cache::with(&app.booted.app.fragment_cache, || {
+    let cached = campfire_views::fragment_cache::with(&app.booted.app.fragments(), || {
         campfire_views::messages::cached_message_fragment(stored.id, stored.updated_at.jiff())
     });
     assert_eq!(cached.as_deref().map(String::as_str), Some(message));

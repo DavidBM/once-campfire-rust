@@ -42,9 +42,18 @@ pub struct AppState {
     /// `Rails.cache` for view fragments (`cache message do`), current during every request
     /// and every render outside one.
     pub fragment_cache: Arc<FragmentCache>,
+    pub response_cache: Arc<crate::response_cache::Store>,
 }
 
 impl AppState {
+    /// Current database namespace for renders outside a GET request.
+    pub fn fragments(&self) -> Arc<FragmentCache> {
+        match self.response_cache.version() {
+            Some(generation) => self.fragment_cache.namespace(generation),
+            None => FragmentCache::new(0),
+        }
+    }
+
     /// The key pages offer browsers to subscribe with: none while Web Push is off, so that browsers
     /// don't subscribe to notifications that would never be sent.
     pub fn vapid_public_key(&self) -> Option<String> {
@@ -139,6 +148,7 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
     kit_config.error_pages = error_pages();
 
     let fragment_cache = FragmentCache::new(config.fragment_cache_bytes);
+    let response_cache = crate::response_cache::Store::open(db.path(), config.response_cache_bytes)?;
     let web_push = crate::integrations::web_push_pool(&config, &db);
     let app = Arc::new(AppState {
         config,
@@ -151,6 +161,7 @@ pub async fn boot(config: Config) -> anyhow::Result<Booted> {
         jobs,
         web_push,
         fragment_cache,
+        response_cache,
     });
 
     let mut registry = jobs::Registry::with_core_jobs();
@@ -180,12 +191,16 @@ fn router(app: &App, kit: Kit) -> Router {
         .route("/{*path}", dispatch())
         .layer(axum::middleware::from_fn(public_files));
     // config.ru: `use Rack::Deflater` around the whole app.
-    campfire_kit::app(routes, kit).layer(axum::middleware::from_fn(campfire_kit::deflater::deflater))
+    campfire_kit::app(routes, kit)
+        .layer(axum::middleware::from_fn(campfire_kit::deflater::deflater))
+        .layer(axum::middleware::from_fn(crate::response_cache::completed))
 }
 
 /// The Rails route table, with the app's fragment cache current while the action runs.
 async fn dispatch_with_fragment_cache(c: &mut Ctx) -> campfire_kit::Result {
-    let cache = c.app().fragment_cache.clone();
+    let snapshot = crate::response_cache::Snapshot::capture(c);
+    c.set_current(snapshot);
+    let cache = crate::response_cache::fragments(c);
     Scoped::new(cache, controllers::dispatch(c)).await
 }
 

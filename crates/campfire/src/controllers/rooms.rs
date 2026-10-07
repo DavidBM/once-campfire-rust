@@ -64,6 +64,9 @@ pub async fn show(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
     let room = set_room(c, Scope::All).await?;
     concerns::remember_last_room_visited(c, room.id);
+    if let Some(response) = crate::response_cache::lookup(c) {
+        return Ok(response);
+    }
     render_show(c, room).await
 }
 
@@ -187,6 +190,7 @@ pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered>
 /// `rooms/show` with `find_messages`: the page around `params[:message_id]`, else the last page.
 async fn render_show(c: &mut Ctx, room: Room) -> Result {
     let app = c.app().clone();
+    let fragments = crate::response_cache::fragments(c);
     let user = require_current_user(c)?.clone();
     let message_id = c.param_str("message_id").and_then(integer_cast);
     let request_host = Some(c.request.host());
@@ -205,7 +209,7 @@ async fn render_show(c: &mut Ctx, room: Room) -> Result {
                 updated_at: room.updated_at.jiff(),
                 user: user_view(&app.secrets, &user),
                 // The page's message fragments come from the store the render then uses.
-                messages: campfire_views::fragment_cache::with(&app.fragment_cache, || presenter.messages(&messages))?,
+                messages: campfire_views::fragment_cache::with(&fragments, || presenter.messages(&messages))?,
                 invitation: original && !Message::paged(conn, room.id)?,
                 join_code: Account::first(conn)?.map(|account| account.join_code).unwrap_or_default(),
                 messages_stream_name: rails_compat::turbo::signed_stream_name(&app.secrets, &[&room_gid, "messages"]),

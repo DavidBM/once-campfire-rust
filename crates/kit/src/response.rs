@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::http::header::{self, HeaderName, HeaderValue};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{Extensions, HeaderMap, StatusCode};
 
 use crate::deflater::splice::PageParts;
 
@@ -19,6 +19,8 @@ pub struct Response {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Body,
+    /// App middleware state carried through response finalization.
+    pub extensions: Extensions,
     /// The body's SHA-256, when `Rack::ETag` digested it.
     pub(crate) body_digest: Option<crate::deflater::BodyDigest>,
 }
@@ -71,7 +73,7 @@ pub struct FileBody {
 
 impl Response {
     pub fn new(status: StatusCode) -> Self {
-        Self { status, headers: HeaderMap::new(), body: Body::Empty, body_digest: None }
+        Self { status, headers: HeaderMap::new(), body: Body::Empty, extensions: Extensions::new(), body_digest: None }
     }
 
     pub fn with_body(status: StatusCode, content_type: &str, body: impl Into<Bytes>) -> Self {

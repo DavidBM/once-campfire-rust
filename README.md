@@ -113,7 +113,15 @@ behavior changes and compatibility limits are listed below.
   20-year expiry. Other authenticated reads avoid the database writer.
 - **Caching:** room, messages and search ETags hash cached page parts rather than the body.
   Copy-link buttons cache paths and resolve them against the page URL; bot JSON is cached per
-  base URL, preventing a request's Host from changing other users' links.
+  base URL, preventing a request's Host from changing other users' links. Authenticated room,
+  messages, sidebar and search responses also retain their completed identity/gzip representation
+  for up to 15 seconds in a bounded 64 MiB store (`CAMPFIRE_RESPONSE_CACHE_MB=0` disables it).
+  Authentication and permissions are checked on every request; any SQLite commit, including
+  another process's writes, invalidates previous responses. Cookies, flash, request variants,
+  conditional requests and HEAD retain their normal behavior. Message fragments share the
+  existing 32 MiB budget across database generations, so direct SQL edits remain visible even
+  without timestamp updates. Message ETags include rendered dependencies; an IMS-only request
+  gets a fresh body when its completed representation is absent from the current cache.
 - **SQLite:** boot adds `index_messages_on_room_id_and_created_at` and
   `index_messages_on_room_id_and_updated_at` if missing. They remain compatible with Rails.
   Memory mapping is disabled; reads use SQLite's page cache.

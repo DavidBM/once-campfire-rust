@@ -346,7 +346,10 @@ pub async fn dispatch(c: &mut Ctx) -> Result {
     };
     install_path_params(c, path_params);
     c.set_current(MatchedRoute { endpoint: route.endpoint });
-    route.action.call(c).await
+    crate::response_cache::begin(c, route.endpoint);
+    let mut response = route.action.call(c).await?;
+    crate::response_cache::prepare(c, &mut response);
+    Ok(response)
 }
 
 /// The first route matching `method` and the normalized `path`, with its path parameters

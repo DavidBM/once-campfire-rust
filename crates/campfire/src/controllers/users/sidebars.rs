@@ -13,10 +13,13 @@ use crate::controllers::presenters::{self, view_context};
 pub async fn show(c: &mut Ctx) -> Result {
     concerns::before_actions(c, Before::default()).await?;
     c.respond_to(&[&format::HTML])?;
+    if let Some(response) = crate::response_cache::lookup(c) {
+        return Ok(response);
+    }
     let user = concerns::require_current_user(c)?.clone();
     let secrets = c.app().secrets.clone();
     let (sidebar, restricted) = {
-        let (user, secrets, fragments) = (user.clone(), secrets.clone(), c.app().fragment_cache.clone());
+        let (user, secrets, fragments) = (user.clone(), secrets.clone(), crate::response_cache::fragments(c));
         c.app()
             .read(move |conn| {
                 // The direct rooms' fragments come from the store the render then uses.

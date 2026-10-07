@@ -85,7 +85,8 @@ fn fitted(mut html: String) -> String {
 /// A byte-bounded in-process fragment store.
 pub struct FragmentCache {
     max_bytes: usize,
-    entries: Mutex<Entries>,
+    entries: Arc<Mutex<Entries>>,
+    namespace: u64,
 }
 
 #[derive(Default)]
@@ -119,7 +120,17 @@ impl FragmentCache {
     /// A store that keeps at most `max_bytes` of entries (as [`CacheSize`] and
     /// [`PER_ENTRY_OVERHEAD`] count them).
     pub fn new(max_bytes: usize) -> Arc<Self> {
-        Arc::new(Self { max_bytes, entries: Mutex::default() })
+        Arc::new(Self { max_bytes, entries: Arc::default(), namespace: 0 })
+    }
+
+    /// A render snapshot sharing this store's byte budget, isolated from other database versions.
+    /// An old in-flight render can populate its own namespace without poisoning the new one.
+    pub fn namespace(&self, namespace: u64) -> Arc<Self> {
+        Arc::new(Self { max_bytes: self.max_bytes, entries: self.entries.clone(), namespace })
+    }
+
+    fn scoped_key<'a>(&self, key: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.namespace == 0 { key.into() } else { format!("\0{}/{key}", self.namespace).into() }
     }
 
     /// `Rails.cache.fetch(key) { render }` for a rendered fragment, shared with the store.
@@ -143,18 +154,19 @@ impl FragmentCache {
         key: &str,
         compute: impl FnOnce() -> Result<T, E>,
     ) -> Result<T, E> {
-        if let Some(value) = self.read::<T>(key) {
+        let key = self.scoped_key(key);
+        if let Some(value) = self.read::<T>(&key) {
             return Ok(value);
         }
         // Rendered unlocked: a fragment renders the fragments nested in it through this store.
         let value = compute()?;
         let size = key.len() + value.cache_size() + PER_ENTRY_OVERHEAD;
-        Ok(self.write(key, value, size))
+        Ok(self.write(&key, value, size))
     }
 
     /// The value `key` holds, if any (a use, for eviction).
     pub fn get<T: Clone + 'static>(&self, key: &str) -> Option<T> {
-        self.read(key)
+        self.read(&self.scoped_key(key))
     }
 
     pub fn len(&self) -> usize {
@@ -418,6 +430,42 @@ mod tests {
         fn cache_size(&self) -> usize {
             4
         }
+    }
+
+    #[test]
+    fn namespaces_share_a_budget_but_cannot_repopulate_a_later_generation() {
+        let store = FragmentCache::new(BIG);
+        let old = store.namespace(1);
+        let current = store.namespace(2);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let renderer = std::thread::spawn(move || {
+            old.fetch_value("message", || {
+                worker_barrier.wait();
+                worker_barrier.wait();
+                "old creator/body/boost".to_string()
+            })
+        });
+        barrier.wait();
+        assert_eq!(current.fetch_value("message", || "fresh creator/body/boost".to_string()), "fresh creator/body/boost");
+        barrier.wait();
+        assert_eq!(renderer.join().unwrap(), "old creator/body/boost");
+        assert_eq!(current.get::<String>("message").unwrap(), "fresh creator/body/boost");
+        assert_eq!(store.len(), 2);
+        assert_eq!(store.bytes(), current.bytes());
+        assert!(store.bytes() <= store.max_bytes());
+    }
+
+    #[test]
+    fn many_namespaces_keep_one_lru_and_memory_limit() {
+        let store = FragmentCache::new(4096);
+        for generation in 1..100 {
+            store.namespace(generation).fetch("message", || "x".repeat(100));
+            assert!(store.bytes() <= store.max_bytes());
+        }
+        assert!(store.len() < 100);
+        assert!(store.namespace(99).get::<Fragment>("message").is_some());
+        assert!(store.namespace(1).get::<Fragment>("message").is_none());
     }
 
     /// What a one-letter key holding `payload` bytes costs.

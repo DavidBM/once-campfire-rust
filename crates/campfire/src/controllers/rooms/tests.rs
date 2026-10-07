@@ -306,7 +306,8 @@ async fn pages_of_messages_go_out_in_parts() {
     ];
     for (path, frame) in &pages {
         let send = |method: Method, gzip: bool| {
-            let mut request = Req::new(method, path);
+            // This checks the fragment-splicing pipeline beneath the completed-response cache.
+            let mut request = Req::new(method, path).header("cache-control", "no-store");
             if gzip {
                 request = request.header("accept-encoding", "gzip");
             }

@@ -13,6 +13,9 @@ use crate::controllers::presenters::page;
 pub async fn index(c: &mut Ctx) -> Result {
     before_actions(c, Before::default()).await?;
     let q = query_param(c)?;
+    if let Some(response) = crate::response_cache::lookup(c) {
+        return Ok(response);
+    }
     let user_id = require_current_user(c)?.id;
     let query = searchable_query(q.as_deref());
     let last_room = concerns::last_room_cookie(c);

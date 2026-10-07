@@ -122,7 +122,7 @@ pub fn render_detached_at<T>(app: &App, account: Option<&Account>, base_url: &st
         app_version: app.config.app_version.clone(),
     };
     // Renders outside a request (broadcasts from jobs) share the fragment cache too.
-    campfire_views::fragment_cache::with(&app.fragment_cache, || render(&ctx))
+    campfire_views::fragment_cache::with(&app.fragments(), || render(&ctx))
 }
 
 /// The broadcast partials, rendered up front by the controller (which has the view models) and

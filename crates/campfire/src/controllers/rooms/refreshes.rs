@@ -18,6 +18,7 @@ pub async fn show(c: &mut Ctx) -> Result {
     c.respond_to(&[&format::TURBO_STREAM])?;
 
     let app = c.app().clone();
+    let fragments = crate::response_cache::fragments(c);
     let request_host = Some(c.request.host());
     let refresh = c
         .app()
@@ -26,7 +27,7 @@ pub async fn show(c: &mut Ctx) -> Result {
             let new_ids: Vec<i64> = new_messages.iter().map(|message| message.id).collect();
             let updated_messages = Message::page_updated_since(conn, room.id, last_updated_at, &new_ids)?;
             let presenter = Presenter::new(conn, &app, request_host);
-            campfire_views::fragment_cache::with(&app.fragment_cache, || {
+            campfire_views::fragment_cache::with(&fragments, || {
                 Ok(RefreshView {
                     room_id: room.id,
                     room_kind: room_kind(room.room_type),

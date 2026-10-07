@@ -36,6 +36,7 @@ use axum::extract::ConnectInfo;
 use tower::ServiceExt;
 
 pub use acme::{AcmeOptions, CertManager};
+pub use cache::{CachedResponse, MemoryCache};
 pub use config::{FrontConfig, LETS_ENCRYPT_URL};
 pub use conn::{Options, Protocol, Service, Shutdown, bind};
 pub use handler::{ConnInfo, Handler};

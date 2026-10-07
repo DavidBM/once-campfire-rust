@@ -8,6 +8,7 @@ mod config;
 mod controllers;
 mod integrations;
 mod jobs;
+mod response_cache;
 mod rich_text;
 #[cfg(test)]
 mod test_support;
