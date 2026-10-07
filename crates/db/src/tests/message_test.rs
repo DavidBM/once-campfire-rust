@@ -133,6 +133,32 @@ fn search_reachable_reads_matches_off_the_index_without_sorting_them() {
 }
 
 #[test]
+fn search_reachable_falls_back_when_newer_matches_are_inaccessible() {
+    let t = TestDb::new();
+    let first = create(&t, "designers", "david", "sparsekeyword", "first-sparse");
+    t.write(move |tx| {
+        tx.conn().execute("DELETE FROM memberships WHERE user_id=? AND room_id!=?", rusqlite::params![id("kevin"), id("designers")])?;
+        for n in 0..1100 {
+            let message = Message::create(
+                tx,
+                NewMessage {
+                    room_id: id("pets"),
+                    creator_id: id("david"),
+                    client_message_id: Some(format!("private-sparse-{n}")),
+                    body: Some("sparsekeyword".into()),
+                    ..Default::default()
+                },
+            )?;
+            assert!(message.id > first.id);
+        }
+        Ok(())
+    });
+    let found = t.read(|c| Message::search_reachable(c, id("kevin"), "sparsekeyword"));
+    assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), vec![first.id]);
+    assert!(t.read(|c| Message::search_reachable(c, -1, "sparsekeyword")).is_empty());
+}
+
+#[test]
 fn creating_a_blank_message_with_attachment_uses_filename_as_plain_text_body() {
     let t = TestDb::new();
     let message = t.write(|tx| {

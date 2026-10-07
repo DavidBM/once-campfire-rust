@@ -138,7 +138,8 @@ behavior changes and compatibility limits are listed below.
   account names and URLs.
 - **Search:** words are literal full-text terms, including `NOT`, `AND`, `OR` and `NEAR`.
   The newest 100 matches are selected by message id, as in current Rails. Imported messages
-  with creation times out of id order follow id order in search.
+  with creation times out of id order follow id order in search. A bounded global scan
+  falls back to a membership-scoped query when most recent matches are inaccessible.
 - **Routes and UI:** `/rooms/directs/:id` redirects to the room; infinite `Accept` q-values sort
   first or last by sign; EdgeHTML install instructions include the missing image; the new-ping
   picker requests JSON so suggestions appear.

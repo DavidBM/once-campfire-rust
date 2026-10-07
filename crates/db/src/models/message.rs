@@ -234,7 +234,15 @@ impl Message {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(reversed(query_all(conn, &search_reachable_sql(), params![user_id, query], Self::from_row)?))
+        if let Some(messages) = search_index_page(conn, user_id, &query)? {
+            return Ok(messages);
+        }
+        // A sparse membership set can miss most global matches. Let SQLite choose the
+        // room-first plan instead of scanning the remaining inaccessible history.
+        let sql = format!(
+            r#"{SELECT_REACHABLE} join message_search_index idx on messages.id = idx.rowid WHERE "memberships"."user_id" = ? AND (idx.body match ?) ORDER BY "messages"."id" DESC LIMIT 100"#
+        );
+        Ok(reversed(query_all(conn, &sql, params![user_id, query], Self::from_row)?))
     }
 
     // Creating, updating, destroying
@@ -469,10 +477,31 @@ fn remove_from_index(tx: &Tx<'_>, id: i64) -> Result<()> {
 /// the page; ordering by `created_at` collected and sorted every match first. Ids follow
 /// `created_at`: messages are only inserted by [`Message::create`], on the one writer thread,
 /// stamped inside their transaction.
+const SEARCH_PROBE_LIMIT: usize = 1000;
+
 pub(crate) fn search_reachable_sql() -> String {
     format!(
-        r#"{SELECT_REACHABLE} join message_search_index idx on messages.id = idx.rowid WHERE "memberships"."user_id" = ? AND (idx.body match ?) ORDER BY idx.rowid DESC LIMIT 100"#
+        "SELECT {}, memberships.user_id IS NOT NULL AS reachable FROM messages INNER JOIN rooms ON messages.room_id = rooms.id LEFT JOIN memberships ON rooms.id = memberships.room_id AND memberships.user_id = ? JOIN message_search_index idx ON messages.id = idx.rowid WHERE idx.body MATCH ? ORDER BY idx.rowid DESC LIMIT {SEARCH_PROBE_LIMIT}",
+        message_columns!()
     )
+}
+
+fn search_index_page(conn: &Connection, user_id: i64, query: &str) -> Result<Option<Vec<Message>>> {
+    let mut stmt = conn.prepare_cached(&search_reachable_sql())?;
+    let mut rows = stmt.query(params![user_id, query])?;
+    let mut messages = Vec::new();
+    let mut examined = 0;
+    while let Some(row) = rows.next()? {
+        examined += 1;
+        if row.get::<_, bool>("reachable")? {
+            messages.push(Message::from_row(row)?);
+            if messages.len() == 100 {
+                return Ok(Some(reversed(messages)));
+            }
+        }
+    }
+    // Exhausting the global matches also proves that a short page is complete.
+    Ok((examined < SEARCH_PROBE_LIMIT).then(|| reversed(messages)))
 }
 
 /// [`Message::page_updated_since`]'s query, leaving out `excluding` ids: the room's id, those ids,
