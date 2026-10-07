@@ -43,7 +43,9 @@ write_room = Integer(labels.fetch("rooms.hq"))
 base = "http://127.0.0.1:#{options[:port]}"
 fixture_env = File.readlines(options[:env_file], chomp: true).reject { |line| line.empty? || line.start_with?("#") }.to_h { |line| line.split("=", 2) }
 lg = ->(*args) do
-  if ENV["LOADGEN_DEBUG"]
+  started = clock
+  cpu_before = Process.times
+  value =   if ENV["LOADGEN_DEBUG"]
     output, errors, status = Open3.capture3("taskset", "-c", options[:client_cpus], options[:loadgen], *args)
     File.open(File.join(work, "loadgen-debug-#{Process.pid}.log"), "ab") { |file| file.write(errors) }
     raise "load generator failed" unless status.success?
@@ -51,6 +53,11 @@ lg = ->(*args) do
   else
     JSON.parse(run("taskset", "-c", options[:client_cpus], options[:loadgen], *args))
   end
+  if args.first == "http"
+    cpu_after = Process.times
+    value["generator_cpu_percent"] = 100.0 * (cpu_after.cutime + cpu_after.cstime - cpu_before.cutime - cpu_before.cstime) / (clock - started)
+  end
+  value
 end
 container = "cf-native-bench-#{Process.pid}"
 results = []
