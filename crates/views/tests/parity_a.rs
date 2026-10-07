@@ -60,13 +60,19 @@ fn sessions_transfer() {
     let html = with_context(name, Request::default(), |ctx| {
         sessions::TransferShow { ctx, action: case(name)["path"].as_str().unwrap().into() }.render().unwrap()
     });
-    assert_eq!(html.matches("<form ").count(), 1);
-    assert_eq!(html.matches("</form>").count(), 1);
-    assert!(html.contains("data-controller=\"auto-submit\""));
-    assert!(html.contains("name=\"_method\" value=\"put\""));
+    assert_eq!(html.matches("<form ").count(), html.matches("</form>").count());
+    let controller = "data-controller=\"auto-submit\"";
+    assert_eq!(html.matches(controller).count(), 1);
+    let start = html.find(controller).unwrap();
+    let end = start + html[start..].find("</form>").unwrap();
+    let form = &html[start..end];
+    assert!(form.contains("name=\"_method\" value=\"put\""));
+    assert!(!form.contains("<form "));
     // The pinned reference omits this closing tag. Require the complete form above,
     // then compare the rest of the page without changing historical fixtures.
-    assert_parity(name, "html", html.replacen("</form>", "", 1));
+    let mut legacy = html;
+    legacy.replace_range(end..end + "</form>".len(), "");
+    assert_parity(name, "html", legacy);
 }
 
 fn user_summary(value: &serde_json::Value) -> users::UserSummary {
