@@ -105,8 +105,9 @@ behavior changes and compatibility limits are listed below.
 - **Caching:** room, messages and search ETags hash cached page parts rather than the body.
   Copy-link buttons cache paths and resolve them against the page URL; bot JSON is cached per
   base URL, preventing a request's Host from changing other users' links.
-- **SQLite:** boot adds `index_messages_on_room_id_and_created_at` if missing. It remains compatible
-  with Rails. Memory mapping is disabled; reads use SQLite's page cache.
+- **SQLite:** boot adds `index_messages_on_room_id_and_created_at` and
+  `index_messages_on_room_id_and_updated_at` if missing. They remain compatible with Rails.
+  Memory mapping is disabled; reads use SQLite's page cache.
 - **Media formats:** libvips 8.16.1 and ffmpeg 7.1.5 use the Rails image's Debian sources, with
   byte-identical thumbnails, posters and metadata for supported formats. libvips omits loaders
   Rails already blocks. ffmpeg omits external-library-only formats: tracker modules, game-console
@@ -136,6 +137,8 @@ behavior changes and compatibility limits are listed below.
 - **JSON:** floats use the shortest equivalent digits. The web app manifest properly JSON-escapes
   account names and URLs.
 - **Search:** words are literal full-text terms, including `NOT`, `AND`, `OR` and `NEAR`.
+  The newest 100 matches are selected by message id, as in current Rails. Imported messages
+  with creation times out of id order follow id order in search.
 - **Routes and UI:** `/rooms/directs/:id` redirects to the room; infinite `Accept` q-values sort
   first or last by sign; EdgeHTML install instructions include the missing image; the new-ping
   picker requests JSON so suggestions appear.

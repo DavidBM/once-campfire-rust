@@ -48,6 +48,10 @@ pub const ADDITIONS: &[&str] = &[
     // with only `index_messages_on_room_id` every room page sorted the room's whole history:
     // 60 ms at 236k messages, against 0.02 ms with this index.
     r#"CREATE INDEX IF NOT EXISTS "index_messages_on_room_id_and_created_at" ON "messages" ("room_id", "created_at")"#,
+    // A refresh asks for the room's messages updated since the page loaded (`page_updated_since`),
+    // usually a handful, and with nothing on `updated_at` it walked the whole room by `created_at`
+    // looking for them: 200 ms at 1M messages, against under 1 ms with this index.
+    r#"CREATE INDEX IF NOT EXISTS "index_messages_on_room_id_and_updated_at" ON "messages" ("room_id", "updated_at")"#,
 ];
 
 /// `timeout: 5000` in `config/database.yml`.
@@ -180,9 +184,9 @@ mod tests {
         assert_eq!(hit, 1, "porter tokenizer");
     }
 
-    fn query_plan(conn: &Connection, sql: &str) -> String {
+    fn query_plan(conn: &Connection, sql: &str, params: impl rusqlite::Params) -> String {
         let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-        let rows = stmt.query_map([], |r| r.get::<_, String>(3)).unwrap();
+        let rows = stmt.query_map(params, |r| r.get::<_, String>(3)).unwrap();
         rows.map(|r| r.unwrap()).collect::<Vec<_>>().join("; ")
     }
 
@@ -191,14 +195,43 @@ mod tests {
         let last_page = r#"SELECT * FROM "messages" WHERE "room_id" = 1 ORDER BY "created_at" DESC LIMIT 40"#;
         let mut conn = Connection::open_in_memory().unwrap();
         prepare(&mut conn, "production", &SystemClock).unwrap();
-        let plan = query_plan(&conn, last_page);
+        let plan = query_plan(&conn, last_page, []);
         assert!(plan.contains("index_messages_on_room_id_and_created_at") && !plan.contains("TEMP B-TREE"), "{plan}");
 
         // A database the Rails app created doesn't have it until the app boots on it.
         conn.execute_batch(r#"DROP INDEX "index_messages_on_room_id_and_created_at""#).unwrap();
-        assert!(query_plan(&conn, last_page).contains("TEMP B-TREE"));
+        assert!(query_plan(&conn, last_page, []).contains("TEMP B-TREE"));
         assert_eq!(prepare(&mut conn, "production", &SystemClock).unwrap(), Prepared::UpToDate);
-        assert!(!query_plan(&conn, last_page).contains("TEMP B-TREE"));
+        assert!(!query_plan(&conn, last_page, []).contains("TEMP B-TREE"));
+    }
+
+    /// A refresh finds the few messages updated since through `updated_at`, rather than walking
+    /// the room by `created_at` looking for them.
+    #[test]
+    fn prepare_adds_the_refresh_index_to_new_and_existing_databases() {
+        let updated_since = crate::models::message::page_updated_since_sql(0);
+        let plan = |conn: &Connection| query_plan(conn, &updated_since, rusqlite::params![1, "2026-01-01 00:00:00"]);
+        let mut conn = Connection::open_in_memory().unwrap();
+        prepare(&mut conn, "production", &SystemClock).unwrap();
+        assert!(plan(&conn).contains("index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?)"), "{}", plan(&conn));
+
+        conn.execute_batch(r#"DROP INDEX "index_messages_on_room_id_and_updated_at""#).unwrap();
+        assert!(!plan(&conn).contains("index_messages_on_room_id_and_updated_at"));
+        assert_eq!(prepare(&mut conn, "production", &SystemClock).unwrap(), Prepared::UpToDate);
+        assert!(plan(&conn).contains("index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?)"), "{}", plan(&conn));
+
+        // After an ANALYZE of a database with large rooms (2M messages, ~200k a room), SQLite would
+        // rather walk (room_id, created_at) to skip the sort, unless the sort is on +created_at.
+        conn.execute_batch(
+            r#"ANALYZE;
+            INSERT INTO sqlite_stat1 VALUES
+              ('messages', 'index_messages_on_room_id', '2000000 200000'),
+              ('messages', 'index_messages_on_room_id_and_created_at', '2000000 200000 1'),
+              ('messages', 'index_messages_on_room_id_and_updated_at', '2000000 200000 1');
+            ANALYZE sqlite_schema;"#,
+        )
+        .unwrap();
+        assert!(plan(&conn).contains("index_messages_on_room_id_and_updated_at (room_id=? AND updated_at>?)"), "{}", plan(&conn));
     }
 
     #[test]
