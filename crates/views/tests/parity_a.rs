@@ -60,7 +60,13 @@ fn sessions_transfer() {
     let html = with_context(name, Request::default(), |ctx| {
         sessions::TransferShow { ctx, action: case(name)["path"].as_str().unwrap().into() }.render().unwrap()
     });
-    assert_parity(name, "html", html);
+    assert_eq!(html.matches("<form ").count(), 1);
+    assert_eq!(html.matches("</form>").count(), 1);
+    assert!(html.contains("data-controller=\"auto-submit\""));
+    assert!(html.contains("name=\"_method\" value=\"put\""));
+    // The pinned reference omits this closing tag. Require the complete form above,
+    // then compare the rest of the page without changing historical fixtures.
+    assert_parity(name, "html", html.replacen("</form>", "", 1));
 }
 
 fn user_summary(value: &serde_json::Value) -> users::UserSummary {
