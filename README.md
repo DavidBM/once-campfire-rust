@@ -87,6 +87,9 @@ behavior changes and compatibility limits are listed below.
 <details>
 <summary>Differences from Rails</summary>
 
+- Sidebar connection refresh waits for the current Turbo frame to finish loading,
+  preventing an aborted response on startup or reconnect. Obsolete connections and removed frames do not reload.
+
 - **WebSockets:** `permessage-deflate` without context takeover compresses each broadcast once
   for all subscribers. Decoded messages remain identical.
 - **CSRF:** `Sec-Fetch-Site` replaces tokens. Writes accept `same-origin` and `same-site`, reject
