@@ -87,6 +87,7 @@ pub struct FragmentCache {
     max_bytes: usize,
     entries: Arc<Mutex<Entries>>,
     namespace: u64,
+    scope: Option<Arc<str>>,
 }
 
 #[derive(Default)]
@@ -120,17 +121,27 @@ impl FragmentCache {
     /// A store that keeps at most `max_bytes` of entries (as [`CacheSize`] and
     /// [`PER_ENTRY_OVERHEAD`] count them).
     pub fn new(max_bytes: usize) -> Arc<Self> {
-        Arc::new(Self { max_bytes, entries: Arc::default(), namespace: 0 })
+        Arc::new(Self { max_bytes, entries: Arc::default(), namespace: 0, scope: None })
     }
 
     /// A render snapshot sharing this store's byte budget, isolated from other database versions.
     /// An old in-flight render can populate its own namespace without poisoning the new one.
     pub fn namespace(&self, namespace: u64) -> Arc<Self> {
-        Arc::new(Self { max_bytes: self.max_bytes, entries: self.entries.clone(), namespace })
+        Arc::new(Self { max_bytes: self.max_bytes, entries: self.entries.clone(), namespace, scope: None })
+    }
+
+    /// Isolates fragments whose rendering depends on an origin or another explicit context.
+    /// The backing store and memory budget remain shared with every other scope.
+    pub fn scoped(&self, scope: impl Into<Arc<str>>) -> Arc<Self> {
+        Arc::new(Self { max_bytes: self.max_bytes, entries: self.entries.clone(), namespace: self.namespace, scope: Some(scope.into()) })
     }
 
     fn scoped_key<'a>(&self, key: &'a str) -> std::borrow::Cow<'a, str> {
-        if self.namespace == 0 { key.into() } else { format!("\0{}/{key}", self.namespace).into() }
+        match &self.scope {
+            Some(scope) => format!("\0{}:{}:{scope}/{key}", self.namespace, scope.len()).into(),
+            None if self.namespace == 0 => key.into(),
+            None => format!("\0{}/{key}", self.namespace).into(),
+        }
     }
 
     /// `Rails.cache.fetch(key) { render }` for a rendered fragment, shared with the store.

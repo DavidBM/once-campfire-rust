@@ -248,8 +248,15 @@ async fn timestamp_free_foreign_edits_invalidate_nested_fragments_and_validators
     assert_ne!(conditional.header("etag"), old.header("etag"));
     foreign.execute("UPDATE users SET name = 'Third foreign creator name' WHERE id = ?", [creator]).unwrap();
     let mut request = get_with_cookie(&messages_path, &cookie);
-    request.headers_mut().insert(header::IF_MODIFIED_SINCE, old.headers[header::LAST_MODIFIED].clone());
+    request.headers_mut().insert(header::IF_MODIFIED_SINCE, "Sat, 01 Jan 2050 00:00:00 GMT".parse().unwrap());
     assert_eq!(send(&test.booted.router, request).await.status, StatusCode::OK);
+    let current = warm(&test, &messages_path, &cookie).await;
+    let mut request = get_with_cookie(&messages_path, &cookie);
+    request.headers_mut().insert(header::IF_MODIFIED_SINCE, "Sat, 01 Jan 2050 00:00:00 GMT".parse().unwrap());
+    let cached_ims = send(&test.booted.router, request).await;
+    assert_eq!(cached_ims.status, StatusCode::OK, "a cache hit cannot invent a Last-Modified validator either");
+    assert_eq!(cached_ims.body, current.body);
+    assert!(cached_ims.header("last-modified").is_none());
 }
 
 #[tokio::test]
@@ -295,4 +302,36 @@ async fn flash_is_rendered_and_consumed_fresh_instead_of_reusing_or_populating_a
         !clean.headers.get_all(header::SET_COOKIE).iter().any(|value| value.to_str().unwrap().starts_with("session_token=")),
         "an old session refresh cookie is not replayed"
     );
+}
+
+#[tokio::test]
+async fn cached_opengraph_fragments_preserve_actual_origin_filtering() {
+    let Some((test, cookie, _user, room)) = fixture().await else { return };
+    let foreign = rusqlite::Connection::open(test.booted.app.db.path()).unwrap();
+    let message: i64 =
+        foreign.query_row("SELECT id FROM messages WHERE room_id = ? ORDER BY created_at DESC LIMIT 1", [room], |row| row.get(0)).unwrap();
+    let embed = r#"<action-text-attachment content-type="application/vnd.actiontext.opengraph-embed" url="https://one.example/embed.png" href="https://one.example/host-sensitive" filename="Origin-sensitive embed"></action-text-attachment>"#;
+    foreign
+        .execute(
+            "UPDATE action_text_rich_texts SET body = ? WHERE record_type = 'Message' AND record_id = ?",
+            rusqlite::params![embed, message],
+        )
+        .unwrap();
+    let path = format!("/rooms/{room}");
+    let request = |host: &str| {
+        let mut request = get_with_cookie(&path, &cookie);
+        request.headers_mut().insert(header::HOST, host.parse().unwrap());
+        request
+    };
+    for _ in 0..4 {
+        assert_eq!(send(&test.booted.router, request("one.example")).await.status, StatusCode::OK);
+    }
+    let same_origin = send(&test.booted.router, request("one.example")).await;
+    assert!(!same_origin.text().contains("https://one.example/host-sensitive"));
+    let elsewhere = send(&test.booted.router, request("two.example")).await;
+    assert!(elsewhere.text().contains("https://one.example/host-sensitive"), "the second origin must render its own nested fragment");
+    let before = hits(&test);
+    assert_eq!(send(&test.booted.router, request("two.example")).await.body, elsewhere.body);
+    assert_eq!(hits(&test), before + 1);
+    assert_eq!(send(&test.booted.router, request("one.example")).await.body, same_origin.body);
 }

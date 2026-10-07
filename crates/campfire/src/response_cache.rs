@@ -104,7 +104,12 @@ impl Snapshot {
     pub fn capture(c: &Ctx) -> Self {
         let generation = c.app().response_cache.version();
         let fragments = match generation {
-            Some(generation) => c.app().fragment_cache.namespace(generation),
+            Some(generation) => {
+                // Opengraph embeds filter links against request_host. Their nested fragments
+                // must have the same origin isolation as the finished response.
+                let origin = hex::encode(Sha256::digest(c.url_for("").as_bytes()));
+                c.app().fragment_cache.namespace(generation).scoped(origin)
+            }
             // An observer error bypasses both caches instead of falling back to an old namespace.
             None => campfire_views::fragment_cache::FragmentCache::new(0),
         };

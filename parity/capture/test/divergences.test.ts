@@ -32,3 +32,16 @@ test("other cookies and bodies still differ", () => {
   const cookie = rust.replace("  headers: cache-control content-type etag vary\n", "  headers: cache-control content-type etag vary\n  set-cookie: flash; path\n")
   assert.notEqual(maskDeliberateNetworkDifferences(rails), maskDeliberateNetworkDifferences(cookie))
 })
+
+
+test("masks only messages-index Last-Modified presence while preserving other headers and bodies", () => {
+  const before = "GET /rooms/1/messages?before=2 → 200\n  headers: cache-control content-type etag last-modified vary\n  body: sha256:123\n";
+  const after = before.replace(" last-modified", "");
+  assert.equal(maskDeliberateNetworkDifferences(before), maskDeliberateNetworkDifferences(after));
+  for (const path of ["/rooms/1/messages/2", "/up", "/users/1/avatar"]) {
+    const other = before.replace("/rooms/1/messages?before=2", path);
+    assert.notEqual(maskDeliberateNetworkDifferences(other), maskDeliberateNetworkDifferences(other.replace(" last-modified", "")));
+  }
+  assert.notEqual(maskDeliberateNetworkDifferences(before), maskDeliberateNetworkDifferences(after.replace("sha256:123", "sha256:456")));
+  assert.notEqual(maskDeliberateNetworkDifferences(before), maskDeliberateNetworkDifferences(after.replace(" etag", "")));
+});

@@ -32,7 +32,7 @@ async fn index_pages_with_conditional_gets() {
     assert!(!reply.text().contains("<html"), "layout false");
     let etag = reply.header("etag").unwrap().to_string();
     assert!(etag.starts_with("W/\""));
-    assert!(reply.header("last-modified").is_some());
+    assert!(reply.header("last-modified").is_none(), "the representation includes dependencies without reliable update timestamps");
 
     let cached = david
         .send(Req::new(Method::GET, &format!("/rooms/{ALL_TALK}/messages?before={}", messages[50].id)).header("if-none-match", &etag))

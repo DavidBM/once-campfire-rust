@@ -119,9 +119,10 @@ behavior changes and compatibility limits are listed below.
   Authentication and permissions are checked on every request; any SQLite commit, including
   another process's writes, invalidates previous responses. Cookies, flash, request variants,
   conditional requests and HEAD retain their normal behavior. Message fragments share the
-  existing 32 MiB budget across database generations, so direct SQL edits remain visible even
-  without timestamp updates. Message ETags include rendered dependencies; an IMS-only request
-  gets a fresh body when its completed representation is absent from the current cache.
+  existing 32 MiB budget across origins and database generations, so direct SQL edits remain visible even
+  without timestamp updates. Message ETags include rendered dependencies; messages omit
+  `Last-Modified` because row timestamps cannot validate foreign edits. An `If-Modified-Since`
+  request receives the current body.
 - **SQLite:** boot adds `index_messages_on_room_id_and_created_at` and
   `index_messages_on_room_id_and_updated_at` if missing. They remain compatible with Rails.
   Memory mapping is disabled; reads use SQLite's page cache.

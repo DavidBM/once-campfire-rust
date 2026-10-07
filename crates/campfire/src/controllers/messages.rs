@@ -37,7 +37,6 @@ pub async fn index(c: &mut Ctx) -> Result {
         return Ok(c.head(StatusCode::NO_CONTENT));
     }
     c.respond_to(&[&format::HTML])?;
-    let last_modified = messages.iter().map(|m| m.updated_at.jiff()).max();
     let views = present(c, move |presenter| presenter.messages(&messages)).await?;
     let response =
         page::bare(c, StatusCode::OK, &format::HTML, |ctx| campfire_views::render_sized!(views::Index { ctx, messages: &views })).await?;
@@ -48,10 +47,9 @@ pub async fn index(c: &mut Ctx) -> Result {
         campfire_kit::Body::Bytes(body) => hex::encode(Sha256::digest(body)),
         _ => return Ok(response),
     };
-    // An IMS-only validator is safe on a current cache hit; on a miss, the old record timestamp
-    // cannot prove that none of the presentation dependencies changed.
-    c.request.headers.remove(axum::http::header::IF_MODIFIED_SINCE);
-    let freshness = Freshness { etag: Some(etag), last_modified, template: Some(TEMPLATE_DIGEST_INDEX.into()), ..Freshness::default() };
+    // These records cannot supply a reliable Last-Modified for timestamp-free foreign edits.
+    // Use the content validator; an IMS-only request conservatively receives the current body.
+    let freshness = Freshness { etag: Some(etag), template: Some(TEMPLATE_DIGEST_INDEX.into()), ..Freshness::default() };
     Ok(c.fresh_when(freshness).unwrap_or(response))
 }
 
