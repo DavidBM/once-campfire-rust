@@ -46,7 +46,7 @@ jobs:
           path: |
             .cargo-home/registry
             target
-          key: cargo-${{ hashFiles('Cargo.lock', 'bench/loadgen/Cargo.lock') }}
+          key: cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-
 
       - name: Build integration fixtures
@@ -54,9 +54,7 @@ jobs:
           parity/bin/reference build
           parity/bin/seed build
 
-      # Each check runs even when an earlier one fails, so one run shows every failure. The loadgen
-      # is a workspace of its own, so `--all` doesn't reach it; it builds into target/bench (as
-      # bench/run does) so the cache keeps it.
+      # Each check runs even when an earlier one fails, so one run shows every failure.
       - name: Rustfmt, clippy and tests
         run: |
           docker run --rm --user "$(id -u):$(id -g)" \
@@ -66,11 +64,8 @@ jobs:
             campfire-toolchain sh -uc '
               status=0
               cargo fmt --all --check || status=1
-              cargo fmt --manifest-path bench/loadgen/Cargo.toml --check || status=1
               cargo clippy --locked --workspace --exclude html5ever --all-targets -- -D warnings || status=1
-              cargo clippy --locked --manifest-path bench/loadgen/Cargo.toml --target-dir target/bench --all-targets -- -D warnings || status=1
               cargo test --locked --no-fail-fast --workspace --exclude html5ever || status=1
-              cargo test --locked --manifest-path bench/loadgen/Cargo.toml --target-dir target/bench || status=1
               exit $status
             '
 
@@ -85,14 +80,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout shared verification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: basecamp/once-campfire-verification
+          ref: 34a2bcb62d82db0dc89509f108b4d7b8b6fa7698
+          path: verification
+          persist-credentials: false
+
       - name: Install benchmark prerequisites
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ruby ruby-minitest sqlite3 ffmpeg
 
       - name: Test response and persistence gates
         run: |
-          ruby bench/test_contracts.rb
-          ruby bench/test_check_sample.rb
-          ruby bench/test_validate_acks.rb
+          ruby verification/bench/test_contracts.rb
+          ruby verification/bench/test_check_sample.rb
+          ruby verification/bench/test_validate_acks.rb
 
   # Dependencies declared but not used (cargo-shear reads the source; no build). Crates it can't
   # see through, like the assets build script's `#[path]` modules, are listed under

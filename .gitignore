@@ -8,3 +8,5 @@ target/
 
 /tmp/
 /bench/loadgen/verified-loadgen
+
+/bench/.work/

@@ -8,7 +8,7 @@
 # copy of parity/.seed/default, a fresh container pinned to SERVER_CPUS, then cold start, idle
 # memory, the HTTP suite, the Action Cable fan-out suite and the upload suite, with container
 # memory sampled throughout and each process's memory, by role, during the fan-out
-# (bench/lib/procmem.py). The load generator (bench/loadgen) runs pinned to LOADGEN_CPUS. Before
+# (bench/lib/procmem.py). The shared verification load generator runs pinned to LOADGEN_CPUS. Before
 # each app's run it waits (up to LOAD_WAIT_SECS) for the 1-minute load average to drop below
 # LOAD_MAX, and records it.
 #
@@ -34,6 +34,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BENCH=$ROOT/bench
+VERIFICATION_ROOT=${VERIFICATION_ROOT:-$(dirname "$ROOT")/once-campfire-verification}
 SEED=$ROOT/parity/.seed/default
 LABELS=$SEED/labels.json
 ENV_FILE=$ROOT/parity/.env.reference
@@ -60,7 +61,7 @@ suite() { [[ " $SUITES " = *" $1 "* ]]; }
 # 1c22a94 fixed; the app now runs as configured.
 RUST_EXTRA_ENV=${RUST_EXTRA_ENV-}
 BASE=http://127.0.0.1:$PORT
-LOADGEN=${LOADGEN:-$ROOT/target/bench/release/loadgen}
+LOADGEN=${LOADGEN:-$VERIFICATION_ROOT/loadgen/target/release/loadgen}
 
 APPS=reference,rust REPS=3 OUT="" USER_AGENT_ARGS=()
 while [ $# -gt 0 ]; do
@@ -72,7 +73,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-OUT=${OUT:-$BENCH/results/$(date +%Y%m%d-%H%M%S)}
+OUT=${OUT:-$ROOT/tmp/bench/results/$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"
 WORK=$BENCH/.work
 CONTAINER=bench-campfire-$PORT
@@ -96,8 +97,9 @@ teardown() {
 }
 trap teardown EXIT INT TERM
 
-if [ "$LOADGEN" = "$ROOT/target/bench/release/loadgen" ]; then
-  (cd "$BENCH/loadgen" && CARGO_TARGET_DIR=$ROOT/target/bench cargo build --release -q)
+if [ "$LOADGEN" = "$VERIFICATION_ROOT/loadgen/target/release/loadgen" ]; then
+  cargo build --release --locked --manifest-path "$VERIFICATION_ROOT/loadgen/Cargo.toml" \
+    --target-dir "$VERIFICATION_ROOT/loadgen/target"
 fi
 
 ROOM=$(label rooms.watercooler)        # the busy room (131 messages)
@@ -290,6 +292,8 @@ PY
 
 {
   echo "date: $(date -Is)"
+  echo "shared verification source: $(git -C "$VERIFICATION_ROOT" rev-parse HEAD) (dirty: $(git -C "$VERIFICATION_ROOT" status --porcelain -- bench loadgen browser | wc -l) files)"
+  echo "shared response gates sha256: $(sha256sum "$VERIFICATION_ROOT/bench/contracts.rb" "$VERIFICATION_ROOT/bench/check_sample.rb" "$VERIFICATION_ROOT/bench/validate_acks.rb" | sha256sum)"
   echo "host: $(uname -r), $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs), $(nproc) threads, $(free -g | awk '/Mem:/{print $2}')GB"
   echo "server cpus: $SERVER_CPUS (nproc $(taskset -c "$SERVER_CPUS" nproc)); loadgen cpus: $LOADGEN_CPUS; network: $NETWORK"
   echo "env: $(env_args | grep -E 'WEB_CONC|JOB_CONC|MAX_THREADS' | tr '\n' ' ')"

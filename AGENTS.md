@@ -44,8 +44,8 @@ faster or better.
 - `cargo clippy --workspace --exclude html5ever --all-targets` should stay clean. (`html5ever` is a
   vendored copy with one backported fix and two small additions for Gumbo's parse limits, all
   recorded in its `Cargo.toml`, and identical to upstream otherwise.)
-- Format with `cargo fmt --all` (`rustfmt.toml`) before committing, and `bench/loadgen`, a workspace
-  of its own, with `cargo fmt --manifest-path bench/loadgen/Cargo.toml`; CI checks both. The
+- Format with `cargo fmt --all` (`rustfmt.toml`) before committing. Shared benchmark and browser
+  gates live in the public `once-campfire-verification` repository; CI pins its revision. The
   vendored html5ever has its own `rustfmt.toml` that turns formatting off, and generated tables are
   marked `#[rustfmt::skip]`.
 - CI also runs `cargo shear` for dependencies declared but not used. When it can't see a real use
@@ -60,7 +60,8 @@ faster or better.
   only where the behavior is non-obvious. Cite the reference file (`reference/app/...`) when
   matching Rails, and say why when deliberately diverging from it.
 - Tests live beside the code. Golden-vector tests read `vectors/*.json`.
-- Performance changes come with before-and-after measurements, recorded under `bench/results/`.
+- Performance changes need before-and-after measurements. Keep raw results in ignored `tmp/bench/`
+  and document the verified current figures and material limitations; do not commit result JSON.
 
 ## Reference container
 
