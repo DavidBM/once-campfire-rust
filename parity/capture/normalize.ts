@@ -16,8 +16,25 @@ const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input"
 
 export function normalizeDocument(html: string, options: NormalizeOptions = {}): string {
   const lines: string[] = []
-  walk(parse(html), 0, lines, options, false)
+  walk(parse(closeReferenceTransferForm(html)), 0, lines, options, false)
   return lines.join("\n") + "\n"
+}
+
+// The frozen Rails transfer template leaves its auto-submit form open, wrapping the footer.
+// Current implementations explicitly close it (README, Known differences). Normalize only
+// this one empty PUT form; native GET tests independently require its explicit closing tag.
+export function closeReferenceTransferForm(html: string): string {
+  const forms = [...html.matchAll(/<form\b[^>]*>/g)].filter((form) =>
+    /\bdata-controller="auto-submit"/.test(form[0]) &&
+    /\baction="(?:https?:\/\/[^"/]+)?\/session\/transfers\/[^"<>]+"/.test(form[0]))
+  if (forms.length !== 1) return html
+  const form = forms[0]
+  const start = form.index! + form[0].length
+  const fields = /^(?:\s*<input\b[^>]*>)+/.exec(html.slice(start))
+  if (!fields || !/<input\b(?=[^>]*\bname="_method")(?=[^>]*\bvalue="put")[^>]*>/.test(fields[0])) return html
+  const end = start + fields[0].length
+  if (!/^\s*<footer\b[^>]*\bid="footer"/.test(html.slice(end))) return html
+  return html.slice(0, end) + "</form>" + html.slice(end)
 }
 
 export function normalizeFragment(html: string, options: NormalizeOptions = {}): string {

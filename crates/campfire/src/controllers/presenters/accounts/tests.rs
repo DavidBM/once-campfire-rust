@@ -328,6 +328,12 @@ async fn transfers_sign_in_on_another_device() {
     let show = phone.get(&path).await;
     assert_eq!(show.status, StatusCode::OK);
     show.assert_form(&path);
+    assert_eq!(show.text().matches("<form ").count(), show.text().matches("</form>").count());
+    assert_eq!(show.text().matches("data-controller=\"auto-submit\"").count(), 1);
+    let start = show.text().find("data-controller=\"auto-submit\"").unwrap();
+    let form = &show.text()[start..show.text()[start..].find("</form>").unwrap() + start];
+    assert!(!form.contains("<footer"));
+    assert!(!form.contains("<form "));
     assert_redirect(&phone.form("put", &path, &[]).await, "http://campfire.test/");
     assert_eq!(phone.get("/users/me/profile").await.status, StatusCode::OK);
 

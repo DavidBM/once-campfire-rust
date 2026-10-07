@@ -87,6 +87,10 @@ behavior changes and compatibility limits are listed below.
 <details>
 <summary>Differences from Rails</summary>
 
+- Session-transfer auto-submit forms explicitly close their form tag; the pinned Rails
+  reference omitted it.
+- Background sidebar refreshes preserve an open New Ping form and selected recipients.
+
 - Sidebar connection refresh waits for the current Turbo frame to finish loading,
   preventing an aborted response on startup or reconnect. Obsolete connections and removed frames do not reload.
 

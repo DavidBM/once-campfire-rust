@@ -1,6 +1,6 @@
 {% extends "layouts/application.html" %}
 {%- block head %}{% endblock %}
 
-{% block content %}{#- A block-less form_with renders only the opening tag and hidden fields, never </form>. #}
-{{ h::form_with(action).method("put").auto_submit().open() }}
+{% block content %}
+{{ h::form_with(action).method("put").auto_submit().open() }}</form>
 {% endblock %}

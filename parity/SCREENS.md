@@ -90,6 +90,11 @@ run-1-vs-run-2 comparison, with the full one), all seeds in parallel.
 
 ## Masks
 
+The normalizer permits one deliberate transfer-page repair: an otherwise empty auto-submit
+PUT form at `/session/transfers/:id` closes before the layout footer. The frozen Rails page
+omits that closing tag. Only this exact form/hidden-field/footer structure is corrected;
+native GET tests require the current transfer form to have its explicit closing tag.
+
 A few values are made up at random by the server while a state runs, so two servers never agree on
 them: today only the join code that `Account::Joinable` generates when `auth/first_run/completed`
 creates the account (every other random value is either seeded or has a typed placeholder in

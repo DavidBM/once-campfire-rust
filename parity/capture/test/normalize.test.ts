@@ -1,8 +1,25 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { maskText, normalizeDocument } from "../normalize.ts"
+import { closeReferenceTransferForm, maskText, normalizeDocument } from "../normalize.ts"
 
 const seedTime = Date.parse("2026-03-02T16:00:00Z")
+
+test("transfer comparison permits only the explicit closing tag on its empty PUT form", () => {
+  const before = '<main><form data-controller="auto-submit" action="/session/transfers/example" method="post"><input name="_method" value="put">'
+  const after = '\n<footer id="footer"></footer></main>'
+  const frozen = before + after
+  const closed = before + "</form>" + after
+  assert.equal(closeReferenceTransferForm(frozen), closed)
+  assert.equal(closeReferenceTransferForm(closed), closed)
+  assert.equal(normalizeDocument(frozen), normalizeDocument(closed))
+  assert.notEqual(normalizeDocument(frozen), normalizeDocument(closed.replace('value="put"', 'value="patch"')))
+  for (const other of [frozen.replace("/session/transfers/", "/join/"),
+                       frozen.replace('data-controller="auto-submit"', 'data-controller="other"'),
+                       frozen + before,
+                       frozen.replace("\n<footer", "<button>Unexpected content</button>\n<footer")]) {
+    assert.equal(closeReferenceTransferForm(other), other)
+  }
+})
 
 test("decodes signed ids behind a URL path", () => {
   const url = "/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnsiZGF0YSI6NSwicHVyIjoiYmxvYl9pZCJ9fQ==--4ceb3a7460a929db324ca5fd0dffee9c8527bfad/moon.jpg"
