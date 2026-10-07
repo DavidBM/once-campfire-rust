@@ -137,11 +137,12 @@ async fn create_attachment_reply(app: &App, room: &Room, bot: &User, attachment:
 async fn broadcast_create(app: &App, room: &Room, message: &Message) -> anyhow::Result<()> {
     let (app, room, message) = (app.clone(), room.clone(), message.clone());
     let db = app.db.clone();
+    let renderer = page::DetachedRenderer::new(&app);
     db.read(move |conn| {
         let presenter = Presenter::new(conn, &app, None);
         let view = presenter.message(&message)?;
         let account = campfire_db::Account::first(conn)?;
-        let html = page::render_detached(&app, account.as_ref(), |ctx| views::message(ctx, &view));
+        let html = renderer.render(&app, account.as_ref(), |ctx| views::message(ctx, &view));
         let partials = Rendered { message: Some(html), ..Rendered::default() };
         app.broadcasts.message_create(conn, &room, &message, &partials)
     })

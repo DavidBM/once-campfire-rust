@@ -46,10 +46,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Current database namespace for renders outside a GET request.
+    /// Current database namespace for request-less broadcasts and jobs.
     pub fn fragments(&self) -> Arc<FragmentCache> {
         match self.response_cache.version() {
-            Some(generation) => self.fragment_cache.namespace(generation),
+            Some(generation) => self.fragment_cache.namespace(generation).scoped("detached"),
             None => FragmentCache::new(0),
         }
     }

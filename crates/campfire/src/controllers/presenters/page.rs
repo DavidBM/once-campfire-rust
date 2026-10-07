@@ -83,13 +83,7 @@ pub async fn bare<T: Into<RecordedPage>>(
     Ok(render_recorded(c, status, template, html.into()))
 }
 
-/// Renders with the `ViewContext` `ApplicationController.render` has: no request, no
-/// `Current.user`, no CSRF tokens, and the renderer's default host (`http://example.org`).
-pub fn render_detached<T>(app: &App, account: Option<&Account>, render: impl FnOnce(&ViewContext) -> T) -> T {
-    render_detached_at(app, account, "http://example.org", render)
-}
-
-/// The base of the URLs in a [`render_detached_at`] during a request. `SetCurrentRequest`'s
+/// The base of the URLs in a [`DetachedRenderer::render_at`] during a request. `SetCurrentRequest`'s
 /// `default_url_options` only carries `request.host` and `request.protocol`, so the port comes
 /// from the renderer's own env (`example.org:80`) and never shows: a request to
 /// `http://localhost:3999` broadcasts `http://localhost/...` links
@@ -98,31 +92,53 @@ pub fn renderer_base_url(c: &Ctx) -> String {
     format!("{}{}", c.request.protocol(), c.request.host())
 }
 
-/// [`render_detached`] during a request: URLs get the request's host through
-/// `default_url_options` (`SetCurrentRequest`), see [`renderer_base_url`].
-pub fn render_detached_at<T>(app: &App, account: Option<&Account>, base_url: &str, render: impl FnOnce(&ViewContext) -> T) -> T {
-    let asset_path = |path: &str| campfire_assets::asset_path(path);
-    let stylesheets = crate::controllers::presenters::view_context::stylesheet_tags();
-    let ctx = ViewContext {
-        current_user: None,
-        account: account_summary(account, false),
-        flash_notice: None,
-        flash_alert: None,
-        platform: Platform::default(),
-        vapid_public_key: app.vapid_public_key(),
-        asset_path: &asset_path,
-        importmap_tags: campfire_assets::javascript_importmap_tags(),
-        stylesheet_tags: &stylesheets.html,
-        custom_styles: None,
-        cable_url: "/cable".into(),
-        base_url: base_url.to_string(),
-        request_url: format!("{base_url}/"),
-        referrer: None,
-        last_room_visited_id: None,
-        app_version: app.config.app_version.clone(),
-    };
-    // Renders outside a request (broadcasts from jobs) share the fragment cache too.
-    campfire_views::fragment_cache::with(&app.fragments(), || render(&ctx))
+/// Request-less rendering with a fragment generation captured before view reads.
+/// Its fragments are isolated from request-host-dependent presentations.
+pub struct DetachedRenderer {
+    fragments: std::sync::Arc<campfire_views::fragment_cache::FragmentCache>,
+}
+
+impl DetachedRenderer {
+    /// Capture before gathering the view: a delayed broadcast may only populate its
+    /// original database generation, even if another connection commits meanwhile.
+    pub fn new(app: &App) -> Self {
+        Self { fragments: app.fragments() }
+    }
+
+    pub fn with_fragments<T>(&self, render: impl FnOnce() -> T) -> T {
+        campfire_views::fragment_cache::with(&self.fragments, render)
+    }
+
+    pub fn render<T>(&self, app: &App, account: Option<&Account>, render: impl FnOnce(&ViewContext) -> T) -> T {
+        self.render_at(app, account, "http://example.org", render)
+    }
+
+    /// [`Self::render`] during a request: URLs get the request's host through
+    /// `default_url_options` (`SetCurrentRequest`), see [`renderer_base_url`].
+    pub fn render_at<T>(&self, app: &App, account: Option<&Account>, base_url: &str, render: impl FnOnce(&ViewContext) -> T) -> T {
+        let asset_path = |path: &str| campfire_assets::asset_path(path);
+        let stylesheets = crate::controllers::presenters::view_context::stylesheet_tags();
+        let ctx = ViewContext {
+            current_user: None,
+            account: account_summary(account, false),
+            flash_notice: None,
+            flash_alert: None,
+            platform: Platform::default(),
+            vapid_public_key: app.vapid_public_key(),
+            asset_path: &asset_path,
+            importmap_tags: campfire_assets::javascript_importmap_tags(),
+            stylesheet_tags: &stylesheets.html,
+            custom_styles: None,
+            cable_url: "/cable".into(),
+            base_url: base_url.to_string(),
+            request_url: format!("{base_url}/"),
+            referrer: None,
+            last_room_visited_id: None,
+            app_version: app.config.app_version.clone(),
+        };
+        // Renders outside a request (broadcasts from jobs) share the fragment cache too.
+        self.with_fragments(|| render(&ctx))
+    }
 }
 
 /// The broadcast partials, rendered up front by the controller (which has the view models) and

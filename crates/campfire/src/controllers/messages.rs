@@ -77,16 +77,16 @@ pub async fn create(c: &mut Ctx) -> Result {
     let kind = room_kind(room.room_type);
     let app = c.app().clone();
     let base_url = c.url_for("");
+    let renderer = page::DetachedRenderer::new(&app);
     let html = c
         .app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
-            let item = campfire_views::fragment_cache::with(&app.fragments(), || presenter.message_item(&message))?;
+            let item = renderer.with_fragments(|| presenter.message_item(&message))?;
             let account = campfire_db::Account::first(conn)?;
-            page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
-                views::CreateStream { ctx, message: &item, room_kind: kind }.render()
-            })
-            .map_err(campfire_db::Error::other)
+            renderer
+                .render_at(&app, account.as_ref(), &base_url, |ctx| views::CreateStream { ctx, message: &item, room_kind: kind }.render())
+                .map_err(campfire_db::Error::other)
         })
         .await?;
     Ok(c.render(StatusCode::OK, &format::TURBO_STREAM, html))
@@ -368,12 +368,13 @@ pub(crate) async fn destroy_message(c: &Ctx, room: &Room, message: &Message) -> 
 pub(crate) async fn broadcast_create(c: &Ctx, room: &Room, message: &Message) -> Result<()> {
     let (app, room, message) = (c.app().clone(), room.clone(), message.clone());
     let base_url = page::renderer_base_url(c);
+    let renderer = page::DetachedRenderer::new(&app);
     c.app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let view = presenter.message(&message)?;
             let account = campfire_db::Account::first(conn)?;
-            let html = page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| views::message(ctx, &view));
+            let html = renderer.render_at(&app, account.as_ref(), &base_url, |ctx| views::message(ctx, &view));
             let partials = Rendered { message: Some(html), ..Rendered::default() };
             app.broadcasts.message_create(conn, &room, &message, &partials)
         })
@@ -385,15 +386,15 @@ pub(crate) async fn broadcast_create(c: &Ctx, room: &Room, message: &Message) ->
 pub(crate) async fn broadcast_replace(c: &Ctx, room: &Room, message: &Message) -> Result<()> {
     let (app, room, message) = (c.app().clone(), room.clone(), message.clone());
     let base_url = page::renderer_base_url(c);
+    let renderer = page::DetachedRenderer::new(&app);
     c.app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
             let view = presenter.message(&message)?;
             let account = campfire_db::Account::first(conn)?;
-            let html = page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| {
-                views::PresentationPartial { ctx, message: &view }.render()
-            })
-            .map_err(campfire_db::Error::other)?;
+            let html = renderer
+                .render_at(&app, account.as_ref(), &base_url, |ctx| views::PresentationPartial { ctx, message: &view }.render())
+                .map_err(campfire_db::Error::other)?;
             let partials = Rendered { message_presentation: Some(html), ..Rendered::default() };
             app.broadcasts.message_replace(&room, &message, &partials);
             Ok(())

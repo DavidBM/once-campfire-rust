@@ -335,3 +335,49 @@ async fn cached_opengraph_fragments_preserve_actual_origin_filtering() {
     assert_eq!(hits(&test), before + 1);
     assert_eq!(send(&test.booted.router, request("one.example")).await.body, same_origin.body);
 }
+
+#[tokio::test]
+async fn delayed_detached_render_does_not_poison_a_new_generation() {
+    use crate::controllers::presenters::{Presenter, page};
+    let Some((test, _cookie, _user, room)) = fixture().await else { return };
+    let app = test.booted.app.clone();
+    let foreign = rusqlite::Connection::open(app.db.path()).unwrap();
+    let id: i64 =
+        foreign.query_row("SELECT id FROM messages WHERE room_id = ? ORDER BY created_at DESC LIMIT 1", [room], |row| row.get(0)).unwrap();
+    foreign
+        .execute(
+            "UPDATE action_text_rich_texts SET body = '<p>old detached render body</p>' WHERE record_type = 'Message' AND record_id = ?",
+            [id],
+        )
+        .unwrap();
+    let old_renderer = page::DetachedRenderer::new(&app);
+    let render_app = app.clone();
+    let old = app
+        .read(move |conn| {
+            let message = campfire_db::Message::find(conn, id)?;
+            Presenter::new(conn, &render_app, None).message(&message)
+        })
+        .await
+        .unwrap();
+    foreign
+        .execute(
+            "UPDATE action_text_rich_texts SET body = '<p>new detached render body</p>' WHERE record_type = 'Message' AND record_id = ?",
+            [id],
+        )
+        .unwrap();
+    // A broadcast has gathered its view, then another connection commits before
+    // render_detached captures the fragment namespace.
+    old_renderer.render(&app, None, |ctx| campfire_views::messages::message(ctx, &old));
+    let fresh_renderer = page::DetachedRenderer::new(&app);
+    let render_app = app.clone();
+    let fresh = app
+        .read(move |conn| {
+            let message = campfire_db::Message::find(conn, id)?;
+            Presenter::new(conn, &render_app, None).message(&message)
+        })
+        .await
+        .unwrap();
+    let html = fresh_renderer.render(&app, None, |ctx| campfire_views::messages::message(ctx, &fresh));
+    assert!(html.contains("new detached render body"), "a delayed old broadcast must not populate the new fragment generation");
+    assert!(!html.contains("old detached render body"));
+}

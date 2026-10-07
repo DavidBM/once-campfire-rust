@@ -119,12 +119,10 @@ impl Snapshot {
 
 /// The request's pre-authentication fragment namespace, also on off-thread reader renders.
 pub fn fragments(c: &Ctx) -> Arc<campfire_views::fragment_cache::FragmentCache> {
-    if (c.request.is_get() || c.request.is_head())
-        && let Some(snapshot) = c.current::<Snapshot>()
-    {
+    if let Some(snapshot) = c.current::<Snapshot>() {
         return snapshot.fragments.clone();
     }
-    c.app().fragments()
+    Snapshot::capture(c).fragments
 }
 
 #[derive(Clone)]

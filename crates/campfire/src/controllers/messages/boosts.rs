@@ -90,12 +90,13 @@ pub(crate) async fn destroy_boost(c: &Ctx, message: &Message, boost: Boost) -> R
 pub(crate) async fn broadcast_create(c: &Ctx, message: &Message, boost: &Boost) -> Result<()> {
     let (app, message, boost) = (c.app().clone(), message.clone(), boost.clone());
     let base_url = page::renderer_base_url(c);
+    let renderer = page::DetachedRenderer::new(&app);
     c.app()
         .read(move |conn| {
             let presenter = crate::controllers::presenters::Presenter::new(conn, &app, None);
             let view = presenter.boost(&boost)?;
             let account = campfire_db::Account::first(conn)?;
-            let html = page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| views::boost(ctx, &view));
+            let html = renderer.render_at(&app, account.as_ref(), &base_url, |ctx| views::boost(ctx, &view));
             let room = Room::find(conn, message.room_id)?;
             let partials = Rendered { boost: Some(html), ..Rendered::default() };
             app.broadcasts.boost_create(&room, &message, &boost, &partials);

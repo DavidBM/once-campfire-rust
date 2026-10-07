@@ -77,6 +77,7 @@ pub async fn destroy(c: &mut Ctx) -> Result {
 async fn broadcast_create_room(c: &Ctx, room: &Room) -> Result<()> {
     let (app, room) = (c.app().clone(), room.clone());
     let base_url = page::renderer_base_url(c);
+    let renderer = page::DetachedRenderer::new(&app);
     c.app()
         .read(move |conn| {
             let presenter = Presenter::new(conn, &app, None);
@@ -84,8 +85,7 @@ async fn broadcast_create_room(c: &Ctx, room: &Room) -> Result<()> {
             let mut partials = Rendered::default();
             for membership in Membership::for_room(conn, room.id)? {
                 let direct = presenter.sidebar_direct(&membership)?;
-                let html =
-                    page::render_detached_at(&app, account.as_ref(), &base_url, |ctx| campfire_views::users::direct_room(ctx, &direct));
+                let html = renderer.render_at(&app, account.as_ref(), &base_url, |ctx| campfire_views::users::direct_room(ctx, &direct));
                 partials.direct_rooms.push((membership.id, html));
             }
             app.broadcasts.direct_room_create(conn, &room, &partials)

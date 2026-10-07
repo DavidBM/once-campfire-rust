@@ -171,6 +171,7 @@ pub(crate) fn existing_user_ids(conn: &campfire_db::Connection, ids: &[i64]) -> 
 pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered> {
     let app = c.app().clone();
     let base_url = page::renderer_base_url(c);
+    let renderer = page::DetachedRenderer::new(&app);
     let room = room.clone();
     let html = c
         .app()
@@ -178,7 +179,7 @@ pub(crate) async fn render_shared_room(c: &Ctx, room: &Room) -> Result<Rendered>
             let presenter = Presenter::new(conn, &app, None);
             let sidebar_room = presenter.sidebar_room(&room);
             let account = Account::first(conn)?;
-            Ok(page::render_detached_at(&app, account.as_ref(), &base_url, |_| {
+            Ok(renderer.render_at(&app, account.as_ref(), &base_url, |_| {
                 campfire_views::users::SidebarSharedPartial { room: sidebar_room }.render()
             }))
         })

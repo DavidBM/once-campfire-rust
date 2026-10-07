@@ -89,6 +89,8 @@ behavior changes and compatibility limits are listed below.
 <details>
 <summary>Differences from Rails</summary>
 
+- Broadcast rendering captures its fragment generation before reading the view, and
+  uses a separate namespace from request-host-dependent fragments.
 - Session-transfer auto-submit forms explicitly close their form tag; the pinned Rails
   reference omitted it.
 - Background sidebar refreshes preserve an open New Ping form and selected recipients.
