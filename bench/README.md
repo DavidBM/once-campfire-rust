@@ -15,7 +15,7 @@ runtime settings as JSON. `--help` lists seed, routes, duration and output optio
 
 Every warmup and measured response must pass its route contract: status and content type,
 valid gzip, complete pages, exact seeded message windows and DOM identities, visible rooms,
-and unchanged static/avatar bytes. Each POST must render its unique request body into the
+and unchanged static/avatar bytes. Avatar preflight fully decodes an image with `ffprobe`. Each POST must render its unique request body into the
 actual room container. The audit then verifies its exact message ID, room, stored body and
 FTS entry; duplicate acknowledgements, missing writes and database corruption fail the run.
 Identical wire bytes reuse a prior full validation by exact equality; changed responses are
@@ -28,6 +28,7 @@ Tooling checks:
 
 ```sh
 cargo test --manifest-path bench/loadgen/Cargo.toml
+ruby bench/test_contracts.rb          # requires ffprobe
 ruby bench/test_check_sample.rb
 ruby bench/test_validate_acks.rb       # requires the sqlite3 CLI
 ```

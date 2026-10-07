@@ -86,10 +86,11 @@ jobs:
           persist-credentials: false
 
       - name: Install benchmark prerequisites
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ruby ruby-minitest sqlite3
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ruby ruby-minitest sqlite3 ffmpeg
 
       - name: Test response and persistence gates
         run: |
+          ruby bench/test_contracts.rb
           ruby bench/test_check_sample.rb
           ruby bench/test_validate_acks.rb
 
