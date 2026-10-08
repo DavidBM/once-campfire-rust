@@ -44,7 +44,9 @@ struct Observer {
 
 impl Observer {
     fn version(&mut self) -> rusqlite::Result<u64> {
-        let current = self.db.query_row("PRAGMA data_version", [], |row| row.get(0))?;
+        // Every request runs this under the store's lock: reuse the prepared statement rather than
+        // preparing and finalizing it each time.
+        let current = self.db.prepare_cached("PRAGMA data_version")?.query_row([], |row| row.get(0))?;
         if current != self.data_version {
             self.generation += 1;
             self.data_version = current;
