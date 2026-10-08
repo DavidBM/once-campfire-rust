@@ -134,10 +134,10 @@ struct Entry {
 
 impl Entry {
     /// Marks the entry used at `now`, writing only if that's later: hits on a hot entry between
-    /// two stores then only read it.
+    /// two stores then only read it, and a hit that read the clock earlier never moves it back.
     fn touch(&self, now: u64) {
         if self.used.load(Ordering::Relaxed) < now {
-            self.used.store(now, Ordering::Relaxed);
+            self.used.fetch_max(now, Ordering::Relaxed);
         }
     }
 }

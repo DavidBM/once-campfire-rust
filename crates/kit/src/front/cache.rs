@@ -106,8 +106,9 @@ impl MemoryCache {
         if item.expires_at < now {
             return None;
         }
+        // `fetch_max`, so a hit that read the clock earlier never moves the time back.
         if item.last_accessed_at.load(Ordering::Relaxed) < accessed_at {
-            item.last_accessed_at.store(accessed_at, Ordering::Relaxed);
+            item.last_accessed_at.fetch_max(accessed_at, Ordering::Relaxed);
         }
         Some(item.value.clone())
     }
