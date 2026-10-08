@@ -439,7 +439,9 @@ async fn forgery_protection_allows_a_missing_header_only_without_ssl() {
     // Browsers send `Sec-Fetch-Site` only to secure origins, so plain HTTP can't require it.
     let app = app();
     assert_eq!(send(&app, post_from(None)).await.status, StatusCode::OK);
-    assert_eq!(send(&app, post_from(Some("cross-site"))).await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    for site in ["cross-site", "none", "bogus", "", "Same-Origin", "same-origin, same-site"] {
+        assert_eq!(send(&app, post_from(Some(site))).await.status, StatusCode::UNPROCESSABLE_ENTITY, "{site:?}");
+    }
 }
 
 #[tokio::test]
@@ -743,4 +745,17 @@ async fn serves_with_peer_addresses_and_shuts_down_gracefully() {
     stop.send(()).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), server).await.unwrap().unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), shutdown.drained()).await.unwrap();
+}
+
+#[tokio::test]
+async fn forgery_protection_requires_metadata_on_proxy_https_without_force_ssl() {
+    let app = app();
+    let request = |site: Option<&str>| {
+        let mut request = post_from(site);
+        request.headers_mut().insert("x-forwarded-proto", "https".parse().unwrap());
+        request
+    };
+    assert_eq!(send(&app, request(None)).await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(&app, request(Some("same-origin"))).await.status, StatusCode::OK);
+    assert_eq!(send(&app, request(Some("same-site"))).await.status, StatusCode::OK);
 }
